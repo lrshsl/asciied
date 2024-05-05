@@ -17,6 +17,8 @@
 #define u32 uint32_t
 #define u64 uint64_t
 
+/*** Function-like macros and inline functions {{{ ***/
+
 #define KEY_ESC 27
 #define CTRL(x) ((x) & 0x1f)
 
@@ -35,6 +37,9 @@ local inline int clamp(int x, int min, int max) {
   return x;
 }
 
+/* }}} */
+
+/*** Types {{{ ***/
 struct CEntry {
   char ch;
   u8 color_id : 5, flags : 3;
@@ -50,7 +55,9 @@ enum err {
 struct Cords {
   int x, y;
 };
+/* }}} */
 
+/*** Globals and accessors {{{ ***/
 local char draw_ch = 'X';
 local int cur_flags = 0;
 local short cur_pair = 0;
@@ -70,15 +77,19 @@ local inline void END_DRAGGING(int y, int x) {
   drag_end.x = x;
 }
 #define IS_DRAGGING drag_start.x != -1
+/* }}} */
 
+/*** Prototypes (forward declarations) {{{ ***/
 local fn finish(int sig);
 local fn react_to_mouse();
 local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
                     short color_id, int flags);
+/* }}} */
 
+/*** Main ***/
 int main(void) {
 
-  /*** Setup ***/
+  /*** Setup {{{ ***/
 
   (void)signal(SIGINT, finish); /* arrange interrupts to terminate */
 
@@ -95,8 +106,9 @@ int main(void) {
                  NULL)) {
     fprintf(stderr, "No mouse events can be captured (try a different terminal "
                     "or set TERM=xterm)\n");
-  }
+  } /* }}} */
 
+  /*** Colors {{{ ***/
   if (has_colors()) {
     start_color();
 
@@ -115,9 +127,9 @@ int main(void) {
     init_pair(12, COLOR_CYAN, COLOR_WHITE);
     init_pair(13, COLOR_MAGENTA, COLOR_WHITE);
     init_pair(14, COLOR_BLACK, COLOR_WHITE);
-  }
+  } /*** }}} ***/
 
-  /*** Main loop ***/
+  /*** Main loop {{{ ***/
 
   struct CEntry buffer[COLS][LINES];
   int x, y;
@@ -129,25 +141,39 @@ int main(void) {
 
     /* Update */
     int ch = getch();
+
+    /* If char is in printable range */
     if (ch >= 32 && ch < 127) {
-      /* Printable character */
+
+      /* Change what char to print */
       draw_ch = ch;
+
     } else {
+
+      /* Some kind of special key */
       switch (ch) {
+
+      /* Quit */
       case KEY_ESC:
       case CTRL('q'):
         finish(0);
         break;
+
+      /* Toggle attributes */
       case CTRL('i'):
         cur_flags ^= A_REVERSE;
         break;
       case CTRL('b'):
         cur_flags ^= A_BOLD;
         break;
+
+      /* Clear (not quit) */
       case CTRL('c'):
         clear();
         memset(buffer, 0, sizeof(buffer));
         break;
+
+      /* Move with arrows */
       case KEY_LEFT:
         if (x > 0)
           try(move(y, x - 1));
@@ -162,21 +188,27 @@ int main(void) {
       case KEY_DOWN:
         try(move(y + 1, x));
         break;
+
+      /* Mouse event */
       case KEY_MOUSE:
-        if (getmouse(&mevent) == OK) {
-          react_to_mouse();
-        }
+        react_to_mouse();
         break;
       }
+
+      /* Else: ignore */
     }
+
+    /* Draw if dragging --> no mouse event */
     if (IS_DRAGGING) {
       write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_flags);
     }
-  }
+  } /* }}} */
+
   finish(ok);
 }
 
-/* Write a char to the screen and make the corresponding entry into the buffer
+/* write_char {{{
+ * Write a char to the screen and make the corresponding entry into the buffer
  */
 local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
                     short color_id, int flags) {
@@ -193,9 +225,14 @@ local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
   move(y, x);
   addch(ch);
   move(y, x); // Don't move on
-}
+} /* }}} */
 
+/* react_to_mouse {{{
+ * Calls getmouse() and handles the event
+ */
 local fn react_to_mouse() {
+  try(getmouse(&mevent));
+
   switch (mevent.bstate) {
   case BUTTON1_DOUBLE_CLICKED:
   case BUTTON1_CLICKED:
@@ -214,9 +251,14 @@ local fn react_to_mouse() {
     printf("state: %d\n", mevent.bstate);
     finish(illegal_state);
   }
-}
+} /* }}} */
 
+/* finish {{{
+ * Clean up and exit safely with a given exit code
+ */
 local fn finish(int sig) {
   endwin();
   exit(sig);
-}
+} /* }}} */
+
+// vim: foldmethod=marker
