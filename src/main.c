@@ -1,8 +1,10 @@
+#include <assert.h>
 #include <ncurses.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define local static
 #define fn void
@@ -40,10 +42,29 @@ local inline int clamp(int x, int min, int max) {
 /* }}} */
 
 /*** Types {{{ ***/
+enum CE_Attrs {
+  CE_NONE,
+  CE_REVERSE,
+  CE_BOLD,
+  CE_ITALIC,
+};
+
 struct CEntry {
   char ch;
-  u8 color_id : 5, flags : 3;
+  u8 color_id : 5, attrs : 3;
 };
+#define ce_byte2color_id(x) ((x) & (u8)0x1f)
+#define ce_byte2attrs(x) ((x) >> 5)
+local attr_t ce_attrs2curs_attr_t(u8 attr) {
+  attr_t result = 0;
+  if (attr & CE_REVERSE)
+    result |= A_REVERSE;
+  if (attr & CE_BOLD)
+    result |= A_BOLD;
+  if (attr & CE_ITALIC)
+    result |= A_ITALIC;
+  return result;
+}
 
 enum err {
   ok,
@@ -59,8 +80,8 @@ struct Cords {
 
 /*** Globals and accessors {{{ ***/
 local char draw_ch = 'X';
-local int cur_flags = 0;
-local short cur_pair = 0;
+local u8 cur_attrs = CE_NONE;
+local u8 cur_pair = 0;
 local MEVENT mevent;
 
 /* Drag event static variables */
@@ -82,12 +103,16 @@ local inline void END_DRAGGING(int y, int x) {
 /*** Prototypes (forward declarations) {{{ ***/
 local fn finish(int sig);
 local fn react_to_mouse();
+local fn draw_buffer(struct CEntry buffer[COLS][LINES]);
 local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
-                    short color_id, int flags);
+                    u8 color_id, u8 flags);
+local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file);
+local fn load_from_file(struct CEntry buffer[COLS][LINES], char *file);
 /* }}} */
 
 /*** Main ***/
 int main(void) {
+  assert(sizeof(struct CEntry) == 2);
 
   /*** Setup {{{ ***/
 
@@ -131,8 +156,12 @@ int main(void) {
 
   /*** Main loop {{{ ***/
 
-  struct CEntry buffer[COLS][LINES];
   int x, y;
+  struct CEntry buffer[COLS][LINES];
+  /* Initialize buffer with spaces */
+  memset(buffer, 32,
+         sizeof(buffer)); /* Haha, this only works bc space is 32 which
+                             luckily doesn't set the first 3 bits */
 
   for (;;) {
     getyx(stdscr, y, x);
@@ -156,21 +185,34 @@ int main(void) {
       /* Quit */
       case KEY_ESC:
       case CTRL('q'):
-        finish(0);
-        break;
+        goto quit;
 
       /* Toggle attributes */
       case CTRL('i'):
-        cur_flags ^= A_REVERSE;
+        cur_attrs ^= CE_REVERSE;
         break;
       case CTRL('b'):
-        cur_flags ^= A_BOLD;
+        cur_attrs ^= CE_BOLD;
         break;
 
-      /* Clear (not quit) */
-      case CTRL('c'):
+      /* New painting */
+      case CTRL('n'):
         clear();
-        memset(buffer, 0, sizeof(buffer));
+        memset(buffer, 32, sizeof(buffer));
+        break;
+
+      /* Reload */
+      case CTRL('r'):
+        draw_buffer(buffer);
+        break;
+
+      /* Save and load file */
+      case CTRL('s'):
+        write_to_file(buffer, "buffer.centry");
+        break;
+      case CTRL('o'):
+        load_from_file(buffer, "buffer.centry");
+        draw_buffer(buffer);
         break;
 
       /* Move with arrows */
@@ -200,28 +242,104 @@ int main(void) {
 
     /* Draw if dragging --> no mouse event */
     if (IS_DRAGGING) {
-      write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_flags);
+      write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
     }
   } /* }}} */
 
-  finish(ok);
+quit:
+  endwin();
+  printf("Terminal size: %dx%d\n", COLS, LINES);
+  exit(0);
 }
+
+/* draw_buffer {{{
+ * Draw the buffer
+ */
+local fn draw_buffer(struct CEntry buffer[COLS][LINES]) {
+  for (int y = 0; y < LINES; ++y) {
+    for (int x = 0; x < COLS; ++x) {
+      struct CEntry *e = &buffer[y][x];
+
+      /* Flags */
+      int attrs = ce_attrs2curs_attr_t(e->attrs);
+      short color_id = e->color_id;
+      chgat(1, attrs, color_id, NULL);
+
+      /* Print the char */
+      mvaddch(y, x, e->ch);
+    }
+  }
+} /* }}} */
+
+/* write_to_file {{{
+ * Write the buffer to the file
+ */
+local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file) {
+  FILE *fp = fopen(file, "wb");
+  if (fp == NULL) {
+    return;
+  }
+  for (int y = 0; y < LINES; ++y) {
+    for (int x = 0; x < COLS; ++x) {
+      struct CEntry *e = &buffer[y][x];
+      u8 flags = e->color_id | e->attrs;
+      fputc(e->ch, fp);
+      fputc(flags, fp);
+    }
+  }
+  fclose(fp);
+} /* }}} */
+
+/* load_from_file {{{
+ * Load the buffer from the file
+ */
+local fn load_from_file(struct CEntry buffer[COLS][LINES], char *file) {
+  FILE *fp = fopen(file, "rb");
+  if (fp == NULL) {
+    return;
+  }
+
+  /* Check the filesize */
+  fseek(fp, 0, SEEK_END);
+  int size = ftell(fp);
+  rewind(fp);
+  assert(size == LINES * COLS * 2);
+
+  for (int y = 0; y < LINES; y++) {
+    for (int x = 0; x < COLS; x++) {
+
+      /* Read two bytes and change the corresponding entry in `buffer` */
+      struct CEntry *e = &buffer[y][x];
+
+      /* Char */
+      e->ch = (u8)fgetc(fp);
+
+      /* Flags */
+      u8 flags = (u8)fgetc(fp);
+      e->color_id = ce_byte2color_id(flags);
+      e->attrs = ce_byte2attrs(flags);
+    }
+  }
+
+  fclose(fp);
+} /* }}} */
 
 /* write_char {{{
  * Write a char to the screen and make the corresponding entry into the buffer
  */
 local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
-                    short color_id, int flags) {
+                    u8 color_id, u8 attrs) {
   y = clamp(y, 0, LINES - 1);
   x = clamp(x, 0, COLS - 1);
 
   /* Write to buffer */
   buffer[y][x].ch = ch;
   buffer[y][x].color_id = color_id;
-  buffer[y][x].flags = flags;
+  buffer[y][x].attrs = attrs;
 
   /* Write to screen */
-  chgat(1, flags, color_id, NULL);
+  attrs = ce_attrs2curs_attr_t(attrs);
+  chgat(1, attrs, color_id, NULL);
   move(y, x);
   addch(ch);
   move(y, x); // Don't move on
@@ -256,9 +374,6 @@ local fn react_to_mouse() {
 /* finish {{{
  * Clean up and exit safely with a given exit code
  */
-local fn finish(int sig) {
-  endwin();
-  exit(sig);
-} /* }}} */
+local fn finish(int sig) { exit(sig); } /* }}} */
 
 // vim: foldmethod=marker
