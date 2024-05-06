@@ -146,12 +146,12 @@ local inline void END_DRAGGING(int y, int x) {
 /*** Prototypes (forward declarations) {{{ ***/
 local fn finish(int sig);
 local fn react_to_mouse();
-local fn draw_buffer(struct CEntry buffer[COLS][LINES]);
-local fn dump_buffer(struct CEntry buffer[COLS][LINES]);
-local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
+local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
+local fn dump_buffer(struct CEntry buffer[LINES][COLS]);
+local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 flags);
-local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file);
-local fn load_from_file(struct CEntry buffer[COLS][LINES], char *file);
+local fn write_to_file(struct CEntry buffer[LINES][COLS], char *file);
+local fn load_from_file(struct CEntry buffer[LINES][COLS], char *file);
 /* }}} */
 
 /*** Main ***/
@@ -178,6 +178,7 @@ int main(void) {
                     "or set TERM=xterm)\n");
   } /* }}} */
 
+
   /*** Colors {{{ ***/
   if (has_colors()) {
     start_color();
@@ -202,11 +203,10 @@ int main(void) {
   /*** Main loop {{{ ***/
 
   int x, y;
-  struct CEntry buffer[COLS][LINES];
+  struct CEntry buffer[LINES][COLS];
   /* Initialize buffer with spaces */
-  memset(buffer, 32,
-         sizeof(buffer)); /* Haha, this only works bc space is 32 which
-                             luckily doesn't set the first 3 bits */
+  memset(buffer, ' ', sizeof(buffer)); /* Haha, this only works bc space is 32
+                             which luckily doesn't set the first 3 bits */
 
   for (;;) {
     getyx(stdscr, y, x);
@@ -301,7 +301,7 @@ quit:
 /* draw_buffer {{{
  * Draw the buffer
  */
-local fn draw_buffer(struct CEntry buffer[COLS][LINES]) {
+local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
@@ -321,12 +321,11 @@ local fn draw_buffer(struct CEntry buffer[COLS][LINES]) {
 /* write_to_file {{{
  * Write the buffer to stdout (debug function)
  */
-local fn dump_buffer(struct CEntry buffer[COLS][LINES]) {
+local fn dump_buffer(struct CEntry buffer[LINES][COLS]) {
   printf("<--- Buffer dump --->\n");
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
-      struct CEntry *e = &buffer[y][x];
-      printf("%c", e->ch);
+      printf("%c", buffer[y][x].ch);
     }
     printf("\n");
   }
@@ -336,7 +335,7 @@ local fn dump_buffer(struct CEntry buffer[COLS][LINES]) {
 /* write_to_file {{{
  * Write the buffer to the file
  */
-local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file) {
+local fn write_to_file(struct CEntry buffer[LINES][COLS], char *file) {
   FILE *fp = fopen(file, "wb");
   if (fp == NULL) {
     return;
@@ -355,7 +354,7 @@ local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file) {
 /* load_from_file {{{
  * Load the buffer from the file
  */
-local fn load_from_file(struct CEntry buffer[COLS][LINES], char *file) {
+local fn load_from_file(struct CEntry buffer[LINES][COLS], char *file) {
   FILE *fp = fopen(file, "rb");
   if (fp == NULL) {
     return;
@@ -386,10 +385,46 @@ local fn load_from_file(struct CEntry buffer[COLS][LINES], char *file) {
   fclose(fp);
 } /* }}} */
 
+/*** {{{
+ * Duplication bug
+ *
+ * What I know:
+ *    - Each char is saved twice to the buffer
+ *      - Once at the correct place and once wrong
+ *      - If on the right half of the screen, it's 1/2 line forward (on the left
+ * side but 1 line down)
+ *      - If on the left half, 1/2 line backwargs (on the right side but 1 line
+ * up)
+ *      - If exactly in the middle, there is one copy of it on the left corner
+ * one line down and another one on the right corner one line up
+ *
+ * Example:
+ *   buf[100][100]:
+ *
+ * buf[20][30] = x;
+ *  -> buf[20][30] == x
+ *  -> buf[19][80] == x
+ *
+ * A buffer with 10x5 could look like this, after setting buffer[2][1] to 'x':
+ *
+ *    0 0 0 0 0 0 0 0 0 0
+ *    0 0 0 0 0 0 x 0 0 0
+ *    0 x 0 0 0 0 0 0 0 0
+ *    0 0 0 0 0 0 0 0 0 0
+ *    0 0 0 0 0 0 0 0 0 0
+ *
+ * How?!
+ *
+ * The bug is in the write_char function or how it is called. But how can it end
+ * up with two or even three entries in the buffer?
+ *
+ *  }}}
+ */
+
 /* write_char {{{
  * Write a char to the screen and make the corresponding entry into the buffer
  */
-local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
+local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 attrs) {
   y = clamp(y, 0, LINES - 1);
   x = clamp(x, 0, COLS - 1);
