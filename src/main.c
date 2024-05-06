@@ -124,6 +124,7 @@ local char draw_ch = 'X';
 local u8 cur_attrs = CE_NONE;
 local u8 cur_pair = 0;
 local MEVENT mevent;
+local char cmdline_buf[1024];
 
 /* Drag event static variables */
 local struct Cords drag_start = {-1, -1};
@@ -145,13 +146,14 @@ local inline void END_DRAGGING(int y, int x) {
 
 /*** Prototypes (forward declarations) {{{ ***/
 local fn finish(int sig);
+local fn get_cmd_input();
 local fn react_to_mouse();
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
 local fn dump_buffer(struct CEntry buffer[LINES][COLS]);
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 flags);
-local fn write_to_file(struct CEntry buffer[LINES][COLS], char *file);
-local fn load_from_file(struct CEntry buffer[LINES][COLS], char *file);
+local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename);
+local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename);
 /* }}} */
 
 /*** Main ***/
@@ -232,6 +234,12 @@ int main(void) {
       case CTRL('q'):
         goto quit;
 
+      case KEY_ENTER:
+      case CTRL('m'):
+      case '\n':
+        get_cmd_input();
+        break;
+
       /* Toggle attributes */
       case CTRL('i'):
         cur_attrs ^= CE_REVERSE;
@@ -243,7 +251,7 @@ int main(void) {
       /* New painting */
       case CTRL('n'):
         clear();
-        memset(buffer, 32, sizeof(buffer));
+        memset(buffer, ' ', sizeof(buffer));
         break;
 
       /* Reload */
@@ -253,10 +261,12 @@ int main(void) {
 
       /* Save and load file */
       case CTRL('s'):
-        write_to_file(buffer, "buffer.centry");
+        get_cmd_input();
+        write_to_file(buffer, cmdline_buf);
         break;
       case CTRL('o'):
-        load_from_file(buffer, "buffer.centry");
+        get_cmd_input();
+        load_from_file(buffer, cmdline_buf);
         draw_buffer(buffer);
         break;
 
@@ -298,6 +308,40 @@ quit:
   exit(0);
 }
 
+local fn get_cmd_input() {
+  /* Go to cmdline position */
+  int y_old, x_old;
+  getyx(stdscr, y_old, x_old);
+  try(mvaddch(LINES - 1, 0, '>'));
+  refresh();
+
+  int i = 0;
+  char ch;
+  while ((ch = getch())) {
+    if (ch == '\n' || ch == CTRL('m')) {
+      cmdline_buf[i] = '\0';
+      break;
+    }
+    cmdline_buf[i] = ch;
+    try(addch(ch));
+    i++;
+  }
+  try(move(LINES - 1, 0));
+  foreach (j, 0, i + 1) {
+    try(addch(' '));
+  }
+  try(move(y_old, x_old));
+  refresh();
+}
+
+/* endswith {{{ */
+local bool endswith(char *str, char *suffix) {
+  int i = strlen(str) - strlen(suffix);
+  if (i < 0)
+    return 0;
+  return strcmp(str + i, suffix) == 0;
+} /* }}} */
+
 /* draw_buffer {{{
  * Draw the buffer
  */
@@ -318,7 +362,7 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
   }
 } /* }}} */
 
-/* write_to_file {{{
+/* dump_buffer {{{
  * Write the buffer to stdout (debug function)
  */
 local fn dump_buffer(struct CEntry buffer[LINES][COLS]) {
@@ -335,11 +379,24 @@ local fn dump_buffer(struct CEntry buffer[LINES][COLS]) {
 /* write_to_file {{{
  * Write the buffer to the file
  */
-local fn write_to_file(struct CEntry buffer[LINES][COLS], char *file) {
+local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
+
+  /* Open the file */
+  char file[128];
+  if (strlen(filename) > 128) {
+    return;
+  }
+  if (endswith(filename, ".centry")) {
+    sprintf(file, "saves/%s", filename);
+  } else {
+    sprintf(file, "saves/%s.centry", filename);
+  }
   FILE *fp = fopen(file, "wb");
   if (fp == NULL) {
     return;
   }
+
+  /* Write the buffer */
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
@@ -348,13 +405,25 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *file) {
       fputc(flags, fp);
     }
   }
+
   fclose(fp);
 } /* }}} */
 
 /* load_from_file {{{
  * Load the buffer from the file
  */
-local fn load_from_file(struct CEntry buffer[LINES][COLS], char *file) {
+local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename) {
+
+  /* Open the file */
+  char file[128];
+  if (strlen(filename) > 128) {
+    return;
+  }
+  if (endswith(filename, ".centry")) {
+    sprintf(file, "saves/%s", filename);
+  } else {
+    sprintf(file, "saves/%s.centry", filename);
+  }
   FILE *fp = fopen(file, "rb");
   if (fp == NULL) {
     return;
@@ -384,42 +453,6 @@ local fn load_from_file(struct CEntry buffer[LINES][COLS], char *file) {
 
   fclose(fp);
 } /* }}} */
-
-/*** {{{
- * Duplication bug
- *
- * What I know:
- *    - Each char is saved twice to the buffer
- *      - Once at the correct place and once wrong
- *      - If on the right half of the screen, it's 1/2 line forward (on the left
- * side but 1 line down)
- *      - If on the left half, 1/2 line backwargs (on the right side but 1 line
- * up)
- *      - If exactly in the middle, there is one copy of it on the left corner
- * one line down and another one on the right corner one line up
- *
- * Example:
- *   buf[100][100]:
- *
- * buf[20][30] = x;
- *  -> buf[20][30] == x
- *  -> buf[19][80] == x
- *
- * A buffer with 10x5 could look like this, after setting buffer[2][1] to 'x':
- *
- *    0 0 0 0 0 0 0 0 0 0
- *    0 0 0 0 0 0 x 0 0 0
- *    0 x 0 0 0 0 0 0 0 0
- *    0 0 0 0 0 0 0 0 0 0
- *    0 0 0 0 0 0 0 0 0 0
- *
- * How?!
- *
- * The bug is in the write_char function or how it is called. But how can it end
- * up with two or even three entries in the buffer?
- *
- *  }}}
- */
 
 /* write_char {{{
  * Write a char to the screen and make the corresponding entry into the buffer
