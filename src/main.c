@@ -105,6 +105,14 @@ local attr_t ce_attrs2curs_attr_t(u8 attr) {
   return result;
 } /* }}} */
 
+local fn test_ce_attrs_helpers() {
+  assert(ce_byte2attrs(0b00110001) == 0b001);
+  assert(ce_byte2color_id(0b00110001) == 0b10001);
+  assert(ce_attrs2curs_attr_t(0) == 0);
+  assert(ce_attrs2curs_attr_t((A_REVERSE | A_ITALIC) == (A_REVERSE | A_ITALIC)));
+  assert(ce_attrs2curs_attr_t(7) == (A_ITALIC | A_BOLD | A_REVERSE));
+}
+
 /* Error codes. Will be extended further and order might change */
 enum err {
   ok,
@@ -151,7 +159,7 @@ local fn react_to_mouse();
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
 local fn dump_buffer(struct CEntry buffer[LINES][COLS]);
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
-                    u8 color_id, u8 flags);
+                    u8 color_id, u8 ce_attr);
 local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename);
 local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename);
 /* }}} */
@@ -210,6 +218,7 @@ int main(void) {
   memset(buffer, ' ', sizeof(buffer)); /* Haha, this only works bc space is 32
                              which luckily doesn't set the first 3 bits */
 
+  test_ce_attrs_helpers();
   for (;;) {
     getyx(stdscr, y, x);
     try(move(y, x));
@@ -308,6 +317,7 @@ quit:
   exit(0);
 }
 
+/* get_cmd_input {{{ */
 local fn get_cmd_input() {
   /* Go to cmdline position */
   int y_old, x_old;
@@ -332,7 +342,7 @@ local fn get_cmd_input() {
   }
   try(move(y_old, x_old));
   refresh();
-}
+} /* }}} */
 
 /* endswith {{{ */
 local bool endswith(char *str, char *suffix) {
@@ -458,17 +468,17 @@ local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename) {
  * Write a char to the screen and make the corresponding entry into the buffer
  */
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
-                    u8 color_id, u8 attrs) {
+                    u8 color_id, u8 ce_attrs) {
   y = clamp(y, 0, LINES - 1);
   x = clamp(x, 0, COLS - 1);
 
   /* Write to buffer */
   buffer[y][x].ch = ch;
   buffer[y][x].color_id = color_id;
-  buffer[y][x].attrs = attrs;
+  buffer[y][x].attrs = ce_attrs;
 
   /* Write to screen */
-  attrs = ce_attrs2curs_attr_t(attrs);
+  attr_t attrs = ce_attrs2curs_attr_t(ce_attrs);
   chgat(1, attrs, color_id, NULL);
   move(y, x);
   addch(ch);
