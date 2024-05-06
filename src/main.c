@@ -39,22 +39,61 @@ local inline int clamp(int x, int min, int max) {
   return x;
 }
 
+/* foreach macro
+ *
+ * Not just for convenience, but also to minimize surface area for errors
+ * (straight-forward for loops can't have typos anymore).
+ *
+ * for (int x = 0; x < 10; ++x) {}
+ *
+ * becomes:
+ *
+ * foreach(x, 0, 10) {}
+ *
+ */
+#define foreach(x, min, max) for (int(x) = (min); ((x) < (max)); (++(x)))
+
 /* }}} */
 
 /*** Types {{{ ***/
 enum CE_Attrs {
-  CE_NONE,
-  CE_REVERSE,
-  CE_BOLD,
-  CE_ITALIC,
+  CE_NONE = 0,
+  CE_REVERSE = 1,
+  CE_BOLD = 2,
+  CE_ITALIC = 4,
 };
 
+/* CEntry {{{
+ * Character entry for `buffer` that is associated with a color pair and a set
+ * of attributes.
+ *
+ * Takes up 2 bytes:
+ *    - One byte for the char (one bit theoritically unused)
+ *    - 5 bits for id of the color pair (allows for 32 different color pairs per
+ * image)
+ *    - 3 bits for the attributes (bold, italic, reverse or combinations of
+ * them)
+ */
 struct CEntry {
   char ch;
   u8 color_id : 5, attrs : 3;
 };
+
+/* CEntry Helpers
+ *
+ * Extract color id and attributes from a byte
+ *
+ * byte : 00010001
+ * split: 00010 001
+ *          |    |
+ *          |    attrs (1 -> CE_REVERSE)
+ *          |
+ *          color id (2 -> color pair nr. 3 (one indexed))
+ */
 #define ce_byte2color_id(x) ((x) & (u8)0x1f)
 #define ce_byte2attrs(x) ((x) >> 5)
+
+/* Convert attributes to curses attributes */
 local attr_t ce_attrs2curs_attr_t(u8 attr) {
   attr_t result = 0;
   if (attr & CE_REVERSE)
@@ -64,15 +103,17 @@ local attr_t ce_attrs2curs_attr_t(u8 attr) {
   if (attr & CE_ITALIC)
     result |= A_ITALIC;
   return result;
-}
+} /* }}} */
 
+/* Error codes. Will be extended further and order might change */
 enum err {
   ok,
   any_err,
   alloc_fail,
-  illegal_state = 69,
+  illegal_state,
 };
 
+/* Coordinate pair */
 struct Cords {
   int x, y;
 };
@@ -88,6 +129,8 @@ local MEVENT mevent;
 local struct Cords drag_start = {-1, -1};
 local struct Cords drag_end;
 
+/* Internally, -1 for x means that we are not dragging.
+ * Helper functions below should be used though */
 local inline void start_dragging(int y, int x) {
   drag_start.y = y;
   drag_start.x = x;
@@ -104,6 +147,7 @@ local inline void END_DRAGGING(int y, int x) {
 local fn finish(int sig);
 local fn react_to_mouse();
 local fn draw_buffer(struct CEntry buffer[COLS][LINES]);
+local fn dump_buffer(struct CEntry buffer[COLS][LINES]);
 local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
                     u8 color_id, u8 flags);
 local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file);
@@ -116,14 +160,15 @@ int main(void) {
 
   /*** Setup {{{ ***/
 
-  (void)signal(SIGINT, finish); /* arrange interrupts to terminate */
+  signal(SIGINT, finish); /* Arrange interrupt handler */
 
-  (void)initscr();      /* initialize the curses library */
-  keypad(stdscr, TRUE); /* enable keyboard mapping (important for mouse) */
-  mouseinterval(50);    /* press+release under 200ms -> click */
-  (void)nonl();         /* tell curses not to do NL->CR/NL on output */
-  (void)cbreak();       /* take input chars one at a time, no wait for \n */
-  (void)noecho();       /* turn off echoing */
+  /* NCurses setup */
+  initscr();            /* Initialize the curses library */
+  keypad(stdscr, TRUE); /* Enable keyboard mapping (important for mouse) */
+  mouseinterval(50);    /* Press+release under 200ms -> click */
+  nonl();               /* Tell curses not to do NL->CR/NL on output */
+  cbreak();             /* Take input chars one at a time, no wait for \n */
+  noecho();             /* Turn off echoing */
 
   // Capture mouse events
   if (!mousemask(BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED |
@@ -233,22 +278,23 @@ int main(void) {
 
       /* Mouse event */
       case KEY_MOUSE:
+        try(getmouse(&mevent));
         react_to_mouse();
+        if (IS_DRAGGING) {
+          write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
+        }
         break;
       }
 
       /* Else: ignore */
     }
-
-    /* Draw if dragging --> no mouse event */
-    if (IS_DRAGGING) {
-      write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
-    }
   } /* }}} */
 
 quit:
   endwin();
+  dump_buffer(buffer);
   printf("Terminal size: %dx%d\n", COLS, LINES);
+  printf("Buffer size: %d\n", LINES * COLS);
   exit(0);
 }
 
@@ -256,19 +302,35 @@ quit:
  * Draw the buffer
  */
 local fn draw_buffer(struct CEntry buffer[COLS][LINES]) {
-  for (int y = 0; y < LINES; ++y) {
-    for (int x = 0; x < COLS; ++x) {
+  foreach (y, 0, LINES) {
+    foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
 
       /* Flags */
       int attrs = ce_attrs2curs_attr_t(e->attrs);
       short color_id = e->color_id;
-      chgat(1, attrs, color_id, NULL);
 
       /* Print the char */
-      mvaddch(y, x, e->ch);
+      move(y, x);
+      chgat(1, attrs, color_id, NULL);
+      addch(e->ch);
     }
   }
+} /* }}} */
+
+/* write_to_file {{{
+ * Write the buffer to stdout (debug function)
+ */
+local fn dump_buffer(struct CEntry buffer[COLS][LINES]) {
+  printf("<--- Buffer dump --->\n");
+  foreach (y, 0, LINES) {
+    foreach (x, 0, COLS) {
+      struct CEntry *e = &buffer[y][x];
+      printf("%c", e->ch);
+    }
+    printf("\n");
+  }
+  printf("<--- End dump --->\n");
 } /* }}} */
 
 /* write_to_file {{{
@@ -279,10 +341,10 @@ local fn write_to_file(struct CEntry buffer[COLS][LINES], char *file) {
   if (fp == NULL) {
     return;
   }
-  for (int y = 0; y < LINES; ++y) {
-    for (int x = 0; x < COLS; ++x) {
+  foreach (y, 0, LINES) {
+    foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
-      u8 flags = e->color_id | e->attrs;
+      u8 flags = e->color_id | (e->attrs << 5);
       fputc(e->ch, fp);
       fputc(flags, fp);
     }
@@ -346,11 +408,9 @@ local fn write_char(struct CEntry buffer[COLS][LINES], int y, int x, char ch,
 } /* }}} */
 
 /* react_to_mouse {{{
- * Calls getmouse() and handles the event
+ * React to mouse events
  */
 local fn react_to_mouse() {
-  try(getmouse(&mevent));
-
   switch (mevent.bstate) {
   case BUTTON1_DOUBLE_CLICKED:
   case BUTTON1_CLICKED:
