@@ -19,6 +19,9 @@
 #define u32 uint32_t
 #define u64 uint64_t
 
+#define usize size_t
+#define isize intptr_t
+
 /*** Function-like macros and inline functions {{{ ***/
 #define KEY_ESC 27
 #define CTRL(x) ((x) & 0x1f)
@@ -127,11 +130,21 @@ enum LogLevel {
 
 /* Error codes. Will be extended further and order might change */
 typedef enum Err {
+
+  /* Success */
   ok,
+
+  /* Can usually be recovered */
+  no_input,
+
+  /* Maybe recoverable */
+  file_not_found, /* fopen failed */
+
+  /* Can't be recovered */
   any_err,
-  alloc_fail,
-  didnt_try_hard_enough,
-  illegal_state,
+  alloc_fail, /* Couln't allocate enough memory */
+  didnt_try_hard_enough, /* Used in `try` macro */
+  illegal_state, /* Assertion failed */
 } Result;
 
 /* Coordinate pair */
@@ -179,7 +192,7 @@ local fn dump_buffer(struct CEntry buffer[LINES][COLS]);
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 ce_attr);
 local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename);
-local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename);
+local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, char *filename);
 /* }}} */
 
 local fn swallow_interrupt(int sig) {
@@ -316,7 +329,11 @@ int main(void) {
         break;
       case CTRL('o'):
         if (get_cmd_input() == ok) {
-          load_from_file(buffer, cmdline_buf);
+          Result res = load_from_file(buffer, y, x, cmdline_buf);
+          if (res != ok && res != no_input) {
+            log(log_err, "Error loading file: %s\n", cmdline_buf);
+            finish(res);
+          }
           draw_buffer(buffer);
         }
         break;
@@ -534,15 +551,22 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
     return;
   }
 
-  /* Write the buffer */
-  foreach (y, 0, LINES) {
-    foreach (x, 0, COLS) {
-      struct CEntry *e = &buffer[y][x];
-      fputc(e->ch, fp);
-      u8 attrs = e->color_id | (e->attrs << 5);
-      fputc(attrs, fp);
-    }
-  }
+  /* Write the header */
+  fwrite("CE", sizeof(char), 2, fp);
+  fwrite(&LINES, sizeof(int), 1, fp);
+  fwrite(&COLS, sizeof(int), 1, fp);
+
+  fwrite(buffer, sizeof(struct CEntry), LINES * COLS, fp);
+
+/*   /1* Write the buffer *1/ */
+/*   foreach (y, 0, LINES) { */
+/*     foreach (x, 0, COLS) { */
+/*       struct CEntry *e = &buffer[y][x]; */
+/*       fputc(e->ch, fp); */
+/*       u8 attrs = e->color_id | (e->attrs << 5); */
+/*       fputc(attrs, fp); */
+/*     } */
+/*   } */
 
   fclose(fp);
 } /* }}} */
@@ -550,33 +574,60 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 /* load_from_file {{{
  * Load the buffer from the file
  */
-local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename) {
+local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, char *filename) {
 
   /* Open the file */
   char file[128];
+
+  /* Check length of filename */
   if (strlen(filename) > 128) {
-    return;
+    return alloc_fail;
   }
+
+  /* Add extension if necessary */
   if (endswith(filename, ".centry")) {
     sprintf(file, "saves/%s", filename);
   } else {
     sprintf(file, "saves/%s.centry", filename);
   }
-  FILE *fp = fopen(file, "rb");
-  if (fp == NULL) {
-    return;
+
+  if (loglvl >= log_info) {
+    log(log_info, "Loading file %s\n", file);
   }
 
-  /* Check the filesize */
-  fseek(fp, 0, SEEK_END);
-  int size = ftell(fp);
-  rewind(fp);
-  assert(size == LINES * COLS * 2);
+  /* Open the file */
+  FILE *fp = fopen(file, "rb");
+  if (fp == NULL) {
+    log(log_warn, "Couldn't open file: %s\n", file);
+    return file_not_found;
+  }
 
-  for (int y = 0; y < LINES; y++) {
-    for (int x = 0; x < COLS; x++) {
+  /* Check the header */
+  /* First two bytes should be 'CE' */
+  char header[2];
+  fread(header, 1, 2, fp);
+  if (header[0] != 'C' || header[1] != 'E') {
+    log(log_warn, "Format not recognized: File header should begin with 'CE'\n");
+    return no_input;
+  }
 
-      /* Read two bytes and change the corresponding entry in `buffer` */
+  /* The next two ints should be lines and columns */
+  int insert_lines, insert_cols;
+  fread(&insert_lines, sizeof(int), 1, fp);
+  fread(&insert_cols, sizeof(int), 1, fp);
+
+  /* Check if the file is too big */
+  if (insert_lines > LINES || insert_cols > COLS) {
+    log(log_warn, "File too big: %s\n", file);
+    fclose(fp);
+    return alloc_fail;
+  }
+
+  /* Read to clip buffer */
+  foreach (y, 0, insert_lines) {
+    foreach (x, 0, insert_cols) {
+
+      /* Read two bytes and change the corresponding entry in `clip_buf` */
       struct CEntry *e = &buffer[y][x];
 
       /* Char */
@@ -589,7 +640,10 @@ local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename) {
     }
   }
 
+  /* insert_partial_buffer(buffer, clip_buf, y, x, insert_lines, insert_cols); */
+
   fclose(fp);
+  return ok;
 } /* }}} */
 
 /* write_char {{{
@@ -597,7 +651,7 @@ local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename) {
  */
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 ce_attrs) {
-  y = clamp(y, 0, LINES - 1);
+  y = clamp(y, 0, LINES - 2);
   x = clamp(x, 0, COLS - 1);
 
   /* Write to buffer */
