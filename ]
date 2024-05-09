@@ -26,8 +26,8 @@
 /* Try an operation and panic (safely) if operation fails */
 #define try(stmt)                                                              \
   if ((stmt) == ERR) {                                                         \
-    log(log_err, "Try failed in %s on line %d\n", __FILE__, __LINE__);          \
-    finish(didnt_try_hard_enough);                                             \
+    fprintf(stderr, "Error 69 in %s on line %d", __FILE__, __LINE__);          \
+    finish(69);                                                                \
   };
 
 local inline int clamp(int x, int min, int max) {
@@ -38,7 +38,7 @@ local inline int clamp(int x, int min, int max) {
   return x;
 }
 
-#define loop for (;;)
+#define loop for(;;)
 
 /* foreach macro
  *
@@ -116,23 +116,12 @@ local fn test_ce_attrs_helpers() {
 }
 
 /* Error codes. Will be extended further and order might change */
-enum LogLevel {
-  log_none,
-  log_err,
-  log_warn,
-  log_info,
-  log_debug,
-  log_all,
-};
-
-/* Error codes. Will be extended further and order might change */
-typedef enum Err {
+enum err {
   ok,
   any_err,
   alloc_fail,
-  didnt_try_hard_enough,
   illegal_state,
-} Result;
+};
 
 /* Coordinate pair */
 struct Cords {
@@ -146,9 +135,6 @@ local u8 cur_attrs = CE_NONE;
 local u8 cur_pair = 0;
 local MEVENT mevent;
 local char cmdline_buf[1024];
-
-/* Log level */
-local enum LogLevel loglvl = log_all;
 
 /* Drag event static variables */
 local struct Cords drag_start = {-1, -1};
@@ -169,10 +155,8 @@ local inline void END_DRAGGING(int y, int x) {
 /* }}} */
 
 /*** Prototypes (forward declarations) {{{ ***/
-local fn log(enum LogLevel lvl, char *fmt, ...);
 local fn finish(int sig);
-
-local Result get_cmd_input();
+local fn get_cmd_input();
 local fn react_to_mouse();
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
 local fn dump_buffer(struct CEntry buffer[LINES][COLS]);
@@ -182,19 +166,13 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename);
 local fn load_from_file(struct CEntry buffer[LINES][COLS], char *filename);
 /* }}} */
 
-local fn swallow_interrupt(int sig) {
-  log(log_debug, "Caught signal %d\n", sig);
-}
-
 /*** Main ***/
 int main(void) {
-  log(log_none, "\n");
-  log(log_info, "Starting...\n");
   assert(sizeof(struct CEntry) == 2);
 
   /*** Setup {{{ ***/
 
-  signal(SIGINT, swallow_interrupt); /* Arrange interrupt handler */
+  signal(SIGINT, finish); /* Arrange interrupt handler */
 
   /* NCurses setup */
   initscr();            /* Initialize the curses library */
@@ -264,7 +242,7 @@ int main(void) {
       ch = getch();
 
       /* Only change if `ch` is in printable range */
-      if (ch >= 32 && ch < 127) {
+      if ((ch = getch()) >= 32 && ch < 127) {
 
         /* Change what char to print */
         draw_ch = ch;
@@ -288,11 +266,8 @@ int main(void) {
         break;
 
       /* Toggle attributes */
-      case 'i':
-        cur_attrs ^= CE_REVERSE;
-        break;
       case CTRL('i'):
-        cur_attrs ^= CE_ITALIC;
+        cur_attrs ^= CE_REVERSE;
         break;
       case CTRL('b'):
         cur_attrs ^= CE_BOLD;
@@ -311,14 +286,13 @@ int main(void) {
 
       /* Save and load file */
       case CTRL('s'):
-        if (get_cmd_input() == ok)
-          write_to_file(buffer, cmdline_buf);
+        get_cmd_input();
+        write_to_file(buffer, cmdline_buf);
         break;
       case CTRL('o'):
-        if (get_cmd_input() == ok) {
-          load_from_file(buffer, cmdline_buf);
-          draw_buffer(buffer);
-        }
+        get_cmd_input();
+        load_from_file(buffer, cmdline_buf);
+        draw_buffer(buffer);
         break;
 
       /* Move with arrows */
@@ -340,10 +314,10 @@ int main(void) {
       /* Mouse event */
       case KEY_MOUSE:
         try(getmouse(&mevent));
+        react_to_mouse();
         if (IS_DRAGGING) {
           write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
         }
-        react_to_mouse();
         break;
       }
 
@@ -358,117 +332,35 @@ quit:
   exit(0);
 }
 
-/* Cmd line {{{ */
-local fn clear_cmd_line() {
-  try(move(LINES - 1, 0));
-  foreach (i, 0, COLS - 1) {
-    try(addch(' '));
-  }
-}
-
-/* get_cmd_input
- * Get input from user via cmd line. User input is written to `cmdline_buf`.
- * Returns `ok` on success, `any_err` on error or interrupt
- */
-local Result get_cmd_input() {
-
+/* get_cmd_input {{{ */
+local bool get_cmd_input() {
   /* Go to cmdline position */
   int y_old, x_old;
   getyx(stdscr, y_old, x_old);
   try(mvaddch(LINES - 1, 0, '>'));
   refresh();
 
-  /* Retrieve input */
   int i = 0;
   char ch;
   while ((ch = getch())) {
-    switch (ch) {
-
-    /* Unexpected end of input */
-    case KEY_ESC:
-    case CTRL('c'):
-    case CTRL('q'):
-    case CTRL('d'):
-
-      /* Clear cmd line and go back to old position */
+    if (ch == KEY_ESC) {
       cmdline_buf[0] = '\0';
-      clear_cmd_line();
-      try(move(y_old, x_old));
-      refresh();
-
-      /* Return error: `cmdline_buf` shouldn't be used */
-      return any_err;
-
-    /* Delete a character */
-    case '\b':
-      if (i > 0) {
-        cmdline_buf[i - 1] = '\0';
-        try(addstr("\b \b"));
-        refresh();
-        i--;
-      }
       break;
-
-    /* Confirm */
-    case '\n':
-    case CTRL('m'):
-      cmdline_buf[i] = '\0';
-      goto quit;
-
-    /* Read more */
-    default:
-      cmdline_buf[i] = ch;
-      try(addch(ch));
-      i++;
     }
+    if (ch == '\n' || ch == CTRL('m')) {
+      cmdline_buf[i] = '\0';
+      break;
+    }
+    cmdline_buf[i] = ch;
+    try(addch(ch));
+    i++;
   }
-
-quit:
-  /* Clear cmd line again */
-  clear_cmd_line();
+  try(move(LINES - 1, 0));
+  foreach (j, 0, i + 1) {
+    try(addch(' '));
+  }
   try(move(y_old, x_old));
   refresh();
-  return ok;
-} /* }}} */
-
-/* log {{{ */
-local fn log(enum LogLevel lvl, char *fmt, ...) {
-  if (loglvl < lvl) {
-    return;
-  }
-
-  FILE *logfile = fopen("log", "a");
-  va_list args;
-
-  /* Print prefix */
-  char *prefix = "";
-  switch (lvl) {
-  case log_none:
-    break;
-  case log_err:
-    prefix = "ERR  : ";
-    break;
-  case log_warn:
-    prefix = "WARN : ";
-    break;
-  case log_info:
-    prefix = "INFO : ";
-    break;
-  case log_debug:
-    prefix = "DEBUG: ";
-    break;
-  case log_all:
-    prefix = "LOG  : ";
-    break;
-  }
-
-  fprintf(logfile, "%s", prefix);
-
-  /* Print message */
-  va_start(args, fmt);
-  vfprintf(logfile, fmt, args);
-  va_end(args);
-  fclose(logfile);
 } /* }}} */
 
 /* endswith {{{ */
@@ -632,7 +524,7 @@ local fn react_to_mouse() {
     /* Catch but do nothing -> sets mevent.x and mevent.y */
     break;
   default:
-    log(log_err, "Illegal mouse state: %d\n", mevent.bstate);
+    printf("state: %d\n", mevent.bstate);
     finish(illegal_state);
   }
 } /* }}} */
@@ -640,10 +532,6 @@ local fn react_to_mouse() {
 /* finish {{{
  * Clean up and exit safely with a given exit code
  */
-local fn finish(int sig) {
-  endwin();
-  log(log_err, "Exiting with signal %d\n", sig);
-  exit(sig);
-} /* }}} */
+local fn finish(int sig) { exit(sig); } /* }}} */
 
 // vim: foldmethod=marker
