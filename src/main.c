@@ -20,7 +20,6 @@
 #define u64 uint64_t
 
 /*** Function-like macros and inline functions {{{ ***/
-
 #define KEY_ESC 27
 #define CTRL(x) ((x) & 0x1f)
 
@@ -38,6 +37,8 @@ local inline int clamp(int x, int min, int max) {
     return max;
   return x;
 }
+
+#define loop for(;;)
 
 /* foreach macro
  *
@@ -109,7 +110,8 @@ local fn test_ce_attrs_helpers() {
   assert(ce_byte2attrs(0b00110001) == 0b001);
   assert(ce_byte2color_id(0b00110001) == 0b10001);
   assert(ce_attrs2curs_attr_t(0) == 0);
-  assert(ce_attrs2curs_attr_t((A_REVERSE | A_ITALIC) == (A_REVERSE | A_ITALIC)));
+  assert(
+      ce_attrs2curs_attr_t((A_REVERSE | A_ITALIC) == (A_REVERSE | A_ITALIC)));
   assert(ce_attrs2curs_attr_t(7) == (A_ITALIC | A_BOLD | A_REVERSE));
 }
 
@@ -188,7 +190,6 @@ int main(void) {
                     "or set TERM=xterm)\n");
   } /* }}} */
 
-
   /*** Colors {{{ ***/
   if (has_colors()) {
     start_color();
@@ -214,12 +215,23 @@ int main(void) {
 
   int x, y;
   struct CEntry buffer[LINES][COLS];
+  struct CEntry clip_buf[LINES][COLS];
+  int clip_x = 0;
+  int clip_y = 0;
   /* Initialize buffer with spaces */
-  memset(buffer, ' ', sizeof(buffer)); /* Haha, this only works bc space is 32
-                             which luckily doesn't set the first 3 bits */
+  /* memset(clip_buf, 0, sizeof(buffer)); */
+  /* memset(buffer, ' ', sizeof(buffer)); /1* Haha, this only works bc space is 32 */
+  /*                            which luckily doesn't set the first 3 bits *1/ */
+  foreach (y, 0, LINES) {
+    foreach (x, 0, COLS) {
+      buffer[y][x].ch = ' ';
+      buffer[y][x].color_id = 0;
+      buffer[y][x].attrs = CE_NONE;
+    }
+  }
 
   test_ce_attrs_helpers();
-  for (;;) {
+  loop {
     getyx(stdscr, y, x);
     try(move(y, x));
     try(refresh());
@@ -243,10 +255,14 @@ int main(void) {
       case CTRL('q'):
         goto quit;
 
+      /* Write and delete under the cursor */
       case KEY_ENTER:
       case CTRL('m'):
       case '\n':
-        get_cmd_input();
+        write_char(buffer, y, x, draw_ch, cur_pair, cur_attrs);
+        break;
+      case '\b':
+        write_char(buffer, y, x, ' ', 0, 0);
         break;
 
       /* Toggle attributes */
@@ -311,7 +327,6 @@ int main(void) {
 
 quit:
   endwin();
-  dump_buffer(buffer);
   printf("Terminal size: %dx%d\n", COLS, LINES);
   printf("Buffer size: %d\n", LINES * COLS);
   exit(0);
@@ -360,16 +375,17 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
     foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
 
-      /* Flags */
-      int attrs = ce_attrs2curs_attr_t(e->attrs);
-      short color_id = e->color_id;
+      /* Convert attrs */
+      attr_t attrs = ce_attrs2curs_attr_t(e->attrs);
 
-      /* Print the char */
+      /* Write to screen */
+      chgat(1, attrs, e->color_id, NULL);
       move(y, x);
-      chgat(1, attrs, color_id, NULL);
       addch(e->ch);
+      move(y, x); // Why tf is this necessary?
     }
   }
+  refresh();
 } /* }}} */
 
 /* dump_buffer {{{
@@ -410,9 +426,9 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
-      u8 flags = e->color_id | (e->attrs << 5);
       fputc(e->ch, fp);
-      fputc(flags, fp);
+      u8 attrs = e->color_id | (e->attrs << 5);
+      fputc(attrs, fp);
     }
   }
 
