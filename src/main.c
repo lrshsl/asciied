@@ -4,7 +4,29 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+/* TODO:
+ *  - Treat screen as a buffer (inch)
+ *  - Split project into different files
+ *    - main, cursed and llib.h header
+ *  - Add tests
+ *
+ * FEATURES:
+ *  - Straight line drawing
+ *  - Selection
+ *    - Clipboard
+ *  - Colors
+ *
+ *  - Command line parsing
+ *  - Blink support
+ */
+
+/* Where to save log and buffer dump */
+#define LOG_FILE_NAME "log/logfile"
+#define BUFFER_DUMP_FILE "log/buffer_dump"
+
+/* Do tests */
+#define TESTS
 
 #define local static
 #define fn void
@@ -29,7 +51,7 @@
 /* Try an operation and panic (safely) if operation fails */
 #define try(stmt)                                                              \
   if ((stmt) == ERR) {                                                         \
-    log(log_err, "Try failed in %s on line %d\n", __FILE__, __LINE__);          \
+    log_add(log_err, "Try failed in %s on line %d\n", __FILE__, __LINE__);     \
     finish(didnt_try_hard_enough);                                             \
   };
 
@@ -80,7 +102,8 @@ enum CE_Attrs {
  */
 struct CEntry {
   char ch;
-  u8 color_id : 5, attrs : 3;
+  u8 color_id : 5,
+     attrs    : 3;
 };
 
 /* CEntry Helpers
@@ -128,6 +151,12 @@ enum LogLevel {
   log_all,
 };
 
+enum Mode {
+  mode_normal,
+  mode_select,
+  mode_drag,
+};
+
 /* Error codes. Will be extended further and order might change */
 typedef enum Err {
 
@@ -142,9 +171,9 @@ typedef enum Err {
 
   /* Can't be recovered */
   any_err,
-  alloc_fail, /* Couln't allocate enough memory */
-  didnt_try_hard_enough, /* Used in `try` macro */
-  illegal_state, /* Assertion failed */
+  alloc_fail,            /* Couldn't allocate enough memory */
+  didnt_try_hard_enough, /* When `try` fails */
+  illegal_state,         /* Assertion failed */
 } Result;
 
 /* Coordinate pair */
@@ -154,6 +183,8 @@ struct Cords {
 /* }}} */
 
 /*** Globals and accessors {{{ ***/
+local enum Mode mode = mode_normal;
+
 local char draw_ch = 'X';
 local u8 cur_attrs = CE_NONE;
 local u8 cur_pair = 0;
@@ -166,46 +197,37 @@ local enum LogLevel loglvl = log_all;
 /* Drag event static variables */
 local struct Cords drag_start = {-1, -1};
 local struct Cords drag_end;
+local bool is_dragging = false;
 
-/* Internally, -1 for x means that we are not dragging.
- * Helper functions below should be used though */
-local inline void start_dragging(int y, int x) {
-  drag_start.y = y;
-  drag_start.x = x;
-}
-local inline void END_DRAGGING(int y, int x) {
-  drag_start.x = -1;
-  drag_end.y = y;
-  drag_end.x = x;
-}
-#define IS_DRAGGING drag_start.x != -1
 /* }}} */
 
 /*** Prototypes (forward declarations) {{{ ***/
-local fn log(enum LogLevel lvl, char *fmt, ...);
+local fn log_add(enum LogLevel lvl, char *fmt, ...);
 local fn finish(int sig);
 
 local Result get_cmd_input();
-local fn react_to_mouse();
+local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
+                        struct CEntry clip_buf[LINES][COLS]);
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
-local fn dump_buffer(struct CEntry buffer[LINES][COLS]);
+local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file);
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 ce_attr);
 local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename);
-local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, char *filename);
+local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x,
+                            char *filename);
 /* }}} */
 
 local fn swallow_interrupt(int sig) {
-  log(log_debug, "Caught signal %d\n", sig);
+  log_add(log_debug, "Caught signal %d\n", sig);
 }
+
+int COLOR_PAIRS_COUNT = 31;
 
 /*** Main ***/
 int main(void) {
-  log(log_none, "\n");
-  log(log_info, "Starting...\n");
-  assert(sizeof(struct CEntry) == 2);
-
   /*** Setup {{{ ***/
+  log_add(log_none, "\n");
+  log_add(log_info, "Starting...\n");
 
   signal(SIGINT, swallow_interrupt); /* Arrange interrupt handler */
 
@@ -229,30 +251,51 @@ int main(void) {
   if (has_colors()) {
     start_color();
 
-    init_pair(1, COLOR_RED, COLOR_BLACK);
-    init_pair(2, COLOR_GREEN, COLOR_BLACK);
-    init_pair(3, COLOR_YELLOW, COLOR_BLACK);
-    init_pair(4, COLOR_BLUE, COLOR_BLACK);
-    init_pair(5, COLOR_CYAN, COLOR_BLACK);
-    init_pair(6, COLOR_MAGENTA, COLOR_BLACK);
-    init_pair(7, COLOR_WHITE, COLOR_BLACK);
+    /* 0 -> NORMAL */
+    init_pair(1, COLOR_CYAN, 0);
+    init_pair(2, COLOR_BLUE, 0);
+    init_pair(3, COLOR_GREEN, 0);
+    init_pair(4, COLOR_YELLOW, 0);
+    init_pair(5, COLOR_RED, 0);
+    init_pair(6, COLOR_MAGENTA, 0);
+    init_pair(7, COLOR_RED, 0);
 
-    init_pair(8, COLOR_RED, COLOR_WHITE);
-    init_pair(9, COLOR_GREEN, COLOR_WHITE);
-    init_pair(10, COLOR_YELLOW, COLOR_WHITE);
-    init_pair(11, COLOR_BLUE, COLOR_WHITE);
-    init_pair(12, COLOR_CYAN, COLOR_WHITE);
-    init_pair(13, COLOR_MAGENTA, COLOR_WHITE);
-    init_pair(14, COLOR_BLACK, COLOR_WHITE);
+    init_pair(8, COLOR_RED, 0);
+    init_pair(9, COLOR_RED, 0);
+    init_pair(10, COLOR_GREEN, 0);
+    init_pair(11, COLOR_YELLOW, 0);
+    init_pair(12, COLOR_BLUE, 0);
+    init_pair(13, COLOR_CYAN, 0);
+    init_pair(14, COLOR_MAGENTA, 0);
+    init_pair(15, COLOR_WHITE, 0);
+
+    init_pair(16, COLOR_RED, 0);
+    init_pair(17, COLOR_RED, 0);
+    init_pair(18, COLOR_GREEN, 0);
+    init_pair(19, COLOR_YELLOW, 0);
+    init_pair(20, COLOR_BLUE, 0);
+    init_pair(21, COLOR_CYAN, 0);
+    init_pair(22, COLOR_MAGENTA, 0);
+    init_pair(23, COLOR_WHITE, 0);
+
+    init_pair(24, COLOR_RED, 0);
+    init_pair(25, COLOR_RED, 0);
+    init_pair(26, COLOR_GREEN, 0);
+    init_pair(27, COLOR_YELLOW, 0);
+    init_pair(28, COLOR_BLUE, 0);
+    init_pair(29, COLOR_CYAN, 0);
+    init_pair(30, COLOR_MAGENTA, 0);
+    init_pair(31, COLOR_WHITE, 0);
+
   } /*** }}} ***/
 
-  /*** Main loop {{{ ***/
-
+  /*** Initialization {{{ ***/
   int x, y;
   struct CEntry buffer[LINES][COLS];
   struct CEntry clip_buf[LINES][COLS];
   int clip_x = 0;
   int clip_y = 0;
+  int palette_element_width_chars = COLS / COLOR_PAIRS_COUNT;
 
   /* Initialize buffer with spaces */
   foreach (y, 0, LINES) {
@@ -263,7 +306,26 @@ int main(void) {
     }
   }
 
+  move(0, 0);
+  foreach (color_id, 0, COLOR_PAIRS_COUNT) {
+    attrset(COLOR_PAIR(color_id));
+    foreach (ltr, 0, palette_element_width_chars) {
+      addch('X');
+      struct CEntry *e = &buffer[0][color_id * palette_element_width_chars + ltr];
+      e->ch = 'X';
+      e->color_id = color_id;
+      e->attrs = CE_NONE;
+    }
+  }
+  /* }}} */
+
+  /* Tests */
+#ifdef TESTS
   test_ce_attrs_helpers();
+  assert(sizeof(struct CEntry) == 2);
+#endif
+
+  /*** Main loop {{{ ***/
   loop {
     getyx(stdscr, y, x);
     try(move(y, x));
@@ -273,7 +335,8 @@ int main(void) {
     int ch = getch();
 
     /* Change draw char with `space + new_char` */
-    if (ch == ' ') {
+    switch (ch) {
+    case ' ':
       ch = getch();
 
       /* Only change if `ch` is in printable range */
@@ -282,97 +345,114 @@ int main(void) {
         /* Change what char to print */
         draw_ch = ch;
       }
-    } else {
+      break;
 
-      switch (ch) {
+    /* Quit */
+    case CTRL('q'):
+      goto quit;
 
-      /* Quit */
-      case CTRL('q'):
-        goto quit;
+    /* Write and delete under the cursor */
+    case KEY_ENTER:
+    case CTRL('m'):
+    case '\n':
+      write_char(buffer, y, x, draw_ch, cur_pair, cur_attrs);
+      break;
+    case '\b':
+      write_char(buffer, y, x, ' ', 0, 0);
+      break;
 
-      /* Write and delete under the cursor */
-      case KEY_ENTER:
-      case CTRL('m'):
-      case '\n':
-        write_char(buffer, y, x, draw_ch, cur_pair, cur_attrs);
-        break;
-      case '\b':
-        write_char(buffer, y, x, ' ', 0, 0);
-        break;
+    /* Toggle attributes */
+    case 'i':
+      cur_attrs ^= CE_REVERSE;
+      break;
+    case CTRL('i'):
+      cur_attrs ^= CE_ITALIC;
+      break;
+    case CTRL('b'):
+      cur_attrs ^= CE_BOLD;
+      break;
 
-      /* Toggle attributes */
-      case 'i':
-        cur_attrs ^= CE_REVERSE;
-        break;
-      case CTRL('i'):
-        cur_attrs ^= CE_ITALIC;
-        break;
-      case CTRL('b'):
-        cur_attrs ^= CE_BOLD;
-        break;
+    /* New painting */
+    case CTRL('n'):
+      clear();
+      memset(buffer, ' ', sizeof(buffer));
+      break;
 
-      /* New painting */
-      case CTRL('n'):
-        clear();
-        memset(buffer, ' ', sizeof(buffer));
-        break;
+    /* Reload */
+    case CTRL('r'):
+      draw_buffer(buffer);
+      break;
 
-      /* Reload */
-      case CTRL('r'):
+    /* Save and load file */
+    case CTRL('s'):
+      if (get_cmd_input() == ok)
+        write_to_file(buffer, cmdline_buf);
+      break;
+    case CTRL('o'):
+      if (get_cmd_input() == ok) {
+        Result res = load_from_file(buffer, y, x, cmdline_buf);
+        if (res != ok && res != no_input) {
+          log_add(log_err, "Error loading file: %s\n", cmdline_buf);
+          finish(res);
+        }
         draw_buffer(buffer);
-        break;
-
-      /* Save and load file */
-      case CTRL('s'):
-        if (get_cmd_input() == ok)
-          write_to_file(buffer, cmdline_buf);
-        break;
-      case CTRL('o'):
-        if (get_cmd_input() == ok) {
-          Result res = load_from_file(buffer, y, x, cmdline_buf);
-          if (res != ok && res != no_input) {
-            log(log_err, "Error loading file: %s\n", cmdline_buf);
-            finish(res);
-          }
-          draw_buffer(buffer);
-        }
-        break;
-
-      /* Move with arrows */
-      case KEY_LEFT:
-        if (x > 0)
-          try(move(y, x - 1));
-        break;
-      case KEY_RIGHT:
-        try(move(y, x + 1));
-        break;
-      case KEY_UP:
-        if (y > 0)
-          try(move(y - 1, x));
-        break;
-      case KEY_DOWN:
-        try(move(y + 1, x));
-        break;
-
-      /* Mouse event */
-      case KEY_MOUSE:
-        try(getmouse(&mevent));
-        if (IS_DRAGGING) {
-          write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
-        }
-        react_to_mouse();
-        break;
       }
+      break;
 
-      /* Else: ignore */
+    /* Copy and paste */
+    case 's':
+      /* Select mode */
+      if (mode != mode_select)
+        mode = mode_select;
+      else
+        mode = mode_normal;
+      break;
+    case 'p':
+      /* TODO */
+      break;
+
+    /* Move with arrows */
+    case KEY_LEFT:
+      if (x > 0)
+        try(move(y, x - 1));
+      break;
+    case KEY_RIGHT:
+      try(move(y, x + 1));
+      break;
+    case KEY_UP:
+      if (y > 0)
+        try(move(y - 1, x));
+      break;
+    case KEY_DOWN:
+      try(move(y + 1, x));
+      break;
+
+    /* Mouse event */
+    case KEY_MOUSE:
+      try(getmouse(&mevent));
+      react_to_mouse(buffer, clip_buf);
+      break;
     }
+
+    /* Else: ignore */
   } /* }}} */
 
+  /*** Quit {{{ ***/
 quit:
   endwin();
   printf("Terminal size: %dx%d\n", COLS, LINES);
   printf("Buffer size: %d\n", LINES * COLS);
+
+  /* Dump buffer to file */
+#ifdef BUFFER_DUMP_FILE
+  FILE *fp = fopen(BUFFER_DUMP_FILE, "w");
+  dump_buffer(buffer, fp);
+  fclose(fp);
+  printf("Buffer dumped to log/buffer_dump\n");
+#endif
+
   exit(0);
+  /* }}} */
 }
 
 /* Cmd line {{{ */
@@ -449,12 +529,12 @@ quit:
 } /* }}} */
 
 /* log {{{ */
-local fn log(enum LogLevel lvl, char *fmt, ...) {
+local fn log_add(enum LogLevel lvl, char *fmt, ...) {
   if (loglvl < lvl) {
     return;
   }
 
-  FILE *logfile = fopen("log", "a");
+  FILE *logfile = fopen(LOG_FILE_NAME, "a");
   va_list args;
 
   /* Print prefix */
@@ -501,6 +581,7 @@ local bool endswith(char *str, char *suffix) {
  */
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
   foreach (y, 0, LINES) {
+    move(y, 0);
     foreach (x, 0, COLS) {
       struct CEntry *e = &buffer[y][x];
 
@@ -508,10 +589,8 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
       attr_t attrs = ce_attrs2curs_attr_t(e->attrs);
 
       /* Write to screen */
-      chgat(1, attrs, e->color_id, NULL);
-      move(y, x);
+      attrset(attrs | COLOR_PAIR(e->color_id));
       addch(e->ch);
-      move(y, x); // Why tf is this necessary?
     }
   }
   refresh();
@@ -520,15 +599,23 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
 /* dump_buffer {{{
  * Write the buffer to stdout (debug function)
  */
-local fn dump_buffer(struct CEntry buffer[LINES][COLS]) {
-  printf("<--- Buffer dump --->\n");
+local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file) {
+  fprintf(file, "<--- Buffer dump --->\nCE%d,%d\n", LINES, COLS);
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
-      printf("%c", buffer[y][x].ch);
+      fprintf(file, "%c", buffer[y][x].ch);
     }
-    printf("\n");
+    fprintf(file, "\n");
   }
-  printf("<--- End dump --->\n");
+  fprintf(file, "<--- End dump --->\n");
+  fprintf(file, "<--- Attrs and color --->\nCE%d,%d\n", LINES, COLS);
+  foreach (y, 0, LINES) {
+    foreach (x, 0, COLS) {
+      fprintf(file, "|%d%d", buffer[y][x].attrs, buffer[y][x].color_id);
+    }
+    fprintf(file, "\n");
+  }
+  fprintf(file, "<--- End dump --->\n");
 } /* }}} */
 
 /* write_to_file {{{
@@ -558,15 +645,15 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 
   fwrite(buffer, sizeof(struct CEntry), LINES * COLS, fp);
 
-/*   /1* Write the buffer *1/ */
-/*   foreach (y, 0, LINES) { */
-/*     foreach (x, 0, COLS) { */
-/*       struct CEntry *e = &buffer[y][x]; */
-/*       fputc(e->ch, fp); */
-/*       u8 attrs = e->color_id | (e->attrs << 5); */
-/*       fputc(attrs, fp); */
-/*     } */
-/*   } */
+  /*   /1* Write the buffer *1/ */
+  /*   foreach (y, 0, LINES) { */
+  /*     foreach (x, 0, COLS) { */
+  /*       struct CEntry *e = &buffer[y][x]; */
+  /*       fputc(e->ch, fp); */
+  /*       u8 attrs = e->color_id | (e->attrs << 5); */
+  /*       fputc(attrs, fp); */
+  /*     } */
+  /*   } */
 
   fclose(fp);
 } /* }}} */
@@ -574,7 +661,8 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 /* load_from_file {{{
  * Load the buffer from the file
  */
-local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, char *filename) {
+local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
+                            int mouse_x, char *filename) {
 
   /* Open the file */
   char file[128];
@@ -592,13 +680,13 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, cha
   }
 
   if (loglvl >= log_info) {
-    log(log_info, "Loading file %s\n", file);
+    log_add(log_info, "Loading file %s\n", file);
   }
 
   /* Open the file */
   FILE *fp = fopen(file, "rb");
   if (fp == NULL) {
-    log(log_warn, "Couldn't open file: %s\n", file);
+    log_add(log_warn, "Couldn't open file: %s\n", file);
     return file_not_found;
   }
 
@@ -607,7 +695,8 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, cha
   char header[2];
   fread(header, 1, 2, fp);
   if (header[0] != 'C' || header[1] != 'E') {
-    log(log_warn, "Format not recognized: File header should begin with 'CE'\n");
+    log_add(log_warn,
+            "Format not recognized: File header should begin with 'CE'\n");
     return no_input;
   }
 
@@ -618,14 +707,14 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, cha
 
   /* Check if the file is too big */
   if (insert_lines > LINES || insert_cols > COLS) {
-    log(log_warn, "File too big: %s\n", file);
+    log_add(log_warn, "File too big: %s\n", file);
     fclose(fp);
     return alloc_fail;
   }
 
   /* Read to clip buffer */
-  foreach (y, 0, insert_lines) {
-    foreach (x, 0, insert_cols) {
+  foreach (y, mouse_y, mouse_y + insert_lines) {
+    foreach (x, mouse_x, mouse_x + insert_cols) {
 
       /* Read two bytes and change the corresponding entry in `clip_buf` */
       struct CEntry *e = &buffer[y][x];
@@ -640,7 +729,8 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, cha
     }
   }
 
-  /* insert_partial_buffer(buffer, clip_buf, y, x, insert_lines, insert_cols); */
+  /* insert_partial_buffer(buffer, clip_buf, y, x, insert_lines, insert_cols);
+   */
 
   fclose(fp);
   return ok;
@@ -651,7 +741,7 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x, cha
  */
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 ce_attrs) {
-  y = clamp(y, 0, LINES - 2);
+  y = clamp(y, 1, LINES - 2);
   x = clamp(x, 0, COLS - 1);
 
   /* Write to buffer */
@@ -661,32 +751,65 @@ local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
 
   /* Write to screen */
   attr_t attrs = ce_attrs2curs_attr_t(ce_attrs);
-  chgat(1, attrs, color_id, NULL);
-  move(y, x);
-  addch(ch);
+  attrset(attrs | COLOR_PAIR(color_id));
+  mvaddch(y, x, ch);
   move(y, x); // Don't move on
 } /* }}} */
 
 /* react_to_mouse {{{
  * React to mouse events
  */
-local fn react_to_mouse() {
+local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
+                        struct CEntry clip_buf[LINES][COLS]) {
   switch (mevent.bstate) {
   case BUTTON1_DOUBLE_CLICKED:
   case BUTTON1_CLICKED:
   case BUTTON1_PRESSED:
-    drag_start.x = mevent.x;
+    /* Start dragging */
+    if (mevent.y == 0) {
+      cur_pair = buffer[0][mevent.x].color_id;
+      log_add(log_info, "Selected color: %d\n", cur_pair);
+      break;
+    }
+    is_dragging = true;
     drag_start.y = mevent.y;
+    drag_start.x = mevent.x;
+
+    /* Delete mouse position report */
     break;
   case BUTTON1_RELEASED:
-    drag_start.x = -1;
-    drag_start.y = -1;
+    /* Stop dragging */
+    is_dragging = false;
+    drag_end.y = mevent.y;
+    drag_end.x = mevent.x;
     break;
   case REPORT_MOUSE_POSITION:
-    /* Catch but do nothing -> sets mevent.x and mevent.y */
+    /* Update dragging */
+    if (mode == mode_normal && is_dragging) {
+      /* Draw at the mouse position */
+      write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
+    } else if (mode == mode_select && is_dragging) {
+      foreach (y, drag_start.y, drag_end.y) {
+        foreach (x, drag_start.x, drag_end.x) {
+
+          /* Write selected region to clip buffer and inverse to screen */
+          struct CEntry *e = &buffer[y][x];
+          char draw_ch = e->ch;
+          short color_pair = e->color_id;
+          attr_t attrs = ce_attrs2curs_attr_t(e->attrs);
+
+          /* Write to screen */
+          attrset(attrs | COLOR_PAIR(color_pair) ^ A_REVERSE);
+          mvaddch(y, x, draw_ch);
+
+          /* Write to clip buffer */
+          clip_buf[y][x] = *e;
+        }
+      }
+    }
     break;
   default:
-    log(log_err, "Illegal mouse state: %d\n", mevent.bstate);
+    log_add(log_err, "Illegal mouse state: %d\n", mevent.bstate);
     finish(illegal_state);
   }
 } /* }}} */
@@ -696,7 +819,7 @@ local fn react_to_mouse() {
  */
 local fn finish(int sig) {
   endwin();
-  log(log_err, "Exiting with signal %d\n", sig);
+  log_add(log_err, "Exiting with signal %d\n", sig);
   exit(sig);
 } /* }}} */
 
