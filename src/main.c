@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "constants.h"
+
 /* TODO:
  *  - Treat screen as a buffer (inch)
  *  - Split project into different files
@@ -102,8 +104,7 @@ enum CE_Attrs {
  */
 struct CEntry {
   char ch;
-  u8 color_id : 5,
-     attrs    : 3;
+  u8 color_id : 5, attrs : 3;
 };
 
 /* CEntry Helpers
@@ -221,8 +222,6 @@ local fn swallow_interrupt(int sig) {
   log_add(log_debug, "Caught signal %d\n", sig);
 }
 
-int COLOR_PAIRS_COUNT = 31;
-
 /*** Main ***/
 int main(void) {
   /*** Setup {{{ ***/
@@ -251,42 +250,9 @@ int main(void) {
   if (has_colors()) {
     start_color();
 
-    /* 0 -> NORMAL */
-    init_pair(1, COLOR_CYAN, 0);
-    init_pair(2, COLOR_BLUE, 0);
-    init_pair(3, COLOR_GREEN, 0);
-    init_pair(4, COLOR_YELLOW, 0);
-    init_pair(5, COLOR_RED, 0);
-    init_pair(6, COLOR_MAGENTA, 0);
-    init_pair(7, COLOR_RED, 0);
-
-    init_pair(8, COLOR_RED, 0);
-    init_pair(9, COLOR_RED, 0);
-    init_pair(10, COLOR_GREEN, 0);
-    init_pair(11, COLOR_YELLOW, 0);
-    init_pair(12, COLOR_BLUE, 0);
-    init_pair(13, COLOR_CYAN, 0);
-    init_pair(14, COLOR_MAGENTA, 0);
-    init_pair(15, COLOR_WHITE, 0);
-
-    init_pair(16, COLOR_RED, 0);
-    init_pair(17, COLOR_RED, 0);
-    init_pair(18, COLOR_GREEN, 0);
-    init_pair(19, COLOR_YELLOW, 0);
-    init_pair(20, COLOR_BLUE, 0);
-    init_pair(21, COLOR_CYAN, 0);
-    init_pair(22, COLOR_MAGENTA, 0);
-    init_pair(23, COLOR_WHITE, 0);
-
-    init_pair(24, COLOR_RED, 0);
-    init_pair(25, COLOR_RED, 0);
-    init_pair(26, COLOR_GREEN, 0);
-    init_pair(27, COLOR_YELLOW, 0);
-    init_pair(28, COLOR_BLUE, 0);
-    init_pair(29, COLOR_CYAN, 0);
-    init_pair(30, COLOR_MAGENTA, 0);
-    init_pair(31, COLOR_WHITE, 0);
-
+    for (int i = 0; i < COLORS_LEN; i++) {
+      init_pair(i, COLORS_ARRAY[i], 0);
+    }
   } /*** }}} ***/
 
   /*** Initialization {{{ ***/
@@ -295,7 +261,7 @@ int main(void) {
   struct CEntry clip_buf[LINES][COLS];
   int clip_x = 0;
   int clip_y = 0;
-  int palette_element_width_chars = COLS / COLOR_PAIRS_COUNT;
+  int palette_element_width_chars = COLS / COLORS_LEN;
 
   /* Initialize buffer with spaces */
   foreach (y, 0, LINES) {
@@ -307,11 +273,12 @@ int main(void) {
   }
 
   move(0, 0);
-  foreach (color_id, 0, COLOR_PAIRS_COUNT) {
+  foreach (color_id, 0, COLORS_LEN) {
     attrset(COLOR_PAIR(color_id));
     foreach (ltr, 0, palette_element_width_chars) {
       addch('X');
-      struct CEntry *e = &buffer[0][color_id * palette_element_width_chars + ltr];
+      struct CEntry *e =
+          &buffer[0][color_id * palette_element_width_chars + ltr];
       e->ch = 'X';
       e->color_id = color_id;
       e->attrs = CE_NONE;
