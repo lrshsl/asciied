@@ -5,7 +5,6 @@
 
 #define local static
 #define fn void
-#define endfn } /* Used with vim: fdm=marker fmr=/\*\*,endfn */
 
 #define i8 int8_t
 #define i16 int16_t
@@ -56,3 +55,4 @@ local inline int clamp(int x, int min, int max) {
 #define foreach(x, min, max) for (int(x) = (min); ((x) < (max)); (++(x)))
 
 #endif
+/* vim: fdm=marker fmr=startfold,endfold */

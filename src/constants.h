@@ -10,7 +10,7 @@
 /* Do tests */
 #define TESTS
 
-/* Colors */
+/* startfold Color definitions */
 #define BLACK 232
 #define BLACK1 234
 
@@ -48,6 +48,7 @@
 #define GREEN3 28
 #define GREEN4 118
 #define GREEN5 154 // Green yellow
+/* endfold */
 
 #define COLORS_LEN 32
 static const u8 COLORS_ARRAY[COLORS_LEN] = {
@@ -60,3 +61,5 @@ static const u8 COLORS_ARRAY[COLORS_LEN] = {
 };
 
 #endif
+
+// vim: foldmethod=marker foldmarker=startfold,endfold

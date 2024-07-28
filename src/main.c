@@ -9,7 +9,7 @@
 #include "header.h"
 #include "log.h"
 
-/** TODO:
+/** startfold TODO:
  *  - Treat screen as a buffer (inch)
  *  - Split project into different files
  *    - main: main logic
@@ -30,9 +30,9 @@
  *   - [ ] Advanced (DSL?)
  * - [ ] Blink support
  *
- * endfn */
+ * endfold */
 
-/** Globals
+/** startfold Globals
  * Globals and accessors
  */
 local enum Mode mode = mode_normal;
@@ -47,9 +47,9 @@ local char cmdline_buf[1024];
 local struct Cords drag_start = {-1, -1};
 local struct Cords drag_end;
 local bool is_dragging = false;
-/* endfn */
+/* endfold */
 
-/** Prototypes
+/** startfold Prototypes
  * Forward declarations
  */
 local fn die_gracefully(int sig);
@@ -60,6 +60,8 @@ local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
                         struct CEntry clip_buf[LINES][COLS]);
 local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
                             struct CEntry clip_buf[LINES][COLS]);
+local fn clip_area(struct CEntry clip_buf[LINES][COLS], int starty, int startx,
+                   int endy, int endx);
 local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
                                 int y);
 local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
@@ -77,9 +79,10 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x,
 
 local fn swallow_interrupt(int sig) {
   log_add(log_debug, "Caught signal %d\n", sig);
-endfn
+}
+/* endfold */
 
-/** main
+/** startfold main
  * Main function
  */
 int main(void) {
@@ -150,9 +153,9 @@ int main(void) {
   }
 
   draw_ui();
-  /* endfn */
+  /* endfold */
 
-  /** Main loop **/
+  /** startfold Main loop **/
   loop {
     getyx(stdscr, y, x);
     try(move(y, x));
@@ -267,9 +270,9 @@ int main(void) {
 
     /* Else: ignore */
   }
-  /* endfn */
+  /* endfold */
 
-  /** Quit **/
+  /** startfold Quit **/
 quit:
   endwin();
   printf("Terminal size: %dx%d\n", COLS, LINES);
@@ -284,10 +287,10 @@ quit:
 #endif
 
   exit(0);
-endfn
-/* endfn main */
+}
+/* endfold */
 
-/** get_cmd_input
+/** startfold get_cmd_input
  * Get input from user via cmd line. User input is written to `cmdline_buf`.
  * Returns `ok` on success, `any_err` on error or interrupt
  */
@@ -350,19 +353,22 @@ quit:
   try(move(y_old, x_old));
   refresh();
   return ok;
-endfn
+}
+/* endfold */
 
-/** clear_cmd_line
- * Clear command line.
- */
-local fn clear_cmd_line() {
+    /** startfold clear_cmd_line
+     * Clear command line.
+     */
+    local fn
+    clear_cmd_line() {
   try(move(LINES - 1, 0));
   foreach (i, 0, COLS - 1) {
     try(addch(' '));
   }
-endfn
+}
+/* endfold */
 
-/** endswith
+/** startfold endswith
  * Check if a given string ends with a given suffix
  */
 local bool endswith(char *str, char *suffix) {
@@ -370,9 +376,10 @@ local bool endswith(char *str, char *suffix) {
   if (i < 0)
     return false;
   return strcmp(str + i, suffix) == 0;
-endfn
+}
+/* endfold */
 
-/** draw_buffer
+/** startfold draw_buffer
  * Draw the buffer
  */
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
@@ -391,9 +398,10 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
     }
   }
   refresh();
-endfn
+}
+/* endfold */
 
-/** draw_ui
+/** startfold draw_ui
  * Draw all elements, that are not part of the image
  */
 local fn draw_ui() {
@@ -409,9 +417,10 @@ local fn draw_ui() {
       /* e->attrs = CE_NONE; */
     }
   }
-endfn
+}
+/* endfold */
 
-/** dump_buffer
+/** startfold dump_buffer
  * Write the buffer to stdout (or another file) [debug function]
  */
 local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file) {
@@ -431,9 +440,10 @@ local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file) {
     fprintf(file, "\n");
   }
   fprintf(file, "<--- End dump --->\n");
-endfn
+}
+/* endfold */
 
-/** write_to_file
+/** startfold write_to_file
  * Write the buffer to the file
  */
 local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
@@ -471,9 +481,10 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
   /*   } */
 
   fclose(fp);
-endfn
+}
+/* endfold */
 
-/** load_from_file
+/** startfold load_from_file
  * Load the buffer from the file
  */
 local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
@@ -539,19 +550,22 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
 
       /* Flags */
       u8 flags = (u8)fgetc(fp);
-      e->color_id = ce_read_color_id(flags); /**< @todo: single instruction [endfn] */
+      e->color_id = ce_read_color_id(flags); /**< @todo: single instruction */
       e->attrs = ce_read_attrs(flags);
     }
   }
 
-  /* insert_partial_buffer(buffer, clip_buf, y, x, insert_lines, insert_cols); */
+  /* insert_partial_buffer(buffer, clip_buf, y, x, insert_lines, insert_cols);
+   */
 
   fclose(fp);
   return ok;
-endfn
+}
+/* endfold */
 
-/** write_char
- * Write a char to the screen and make the corresponding entry into the buffer
+/** startfold write_char
+ * Write a char to the screen and make the corresponding entry into the
+ * buffer
  */
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 ce_attrs) {
@@ -568,9 +582,10 @@ local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
   attrset(attrs | COLOR_PAIR(color_id));
   mvaddch(y, x, ch);
   move(y, x); // Don't move on
-endfn
+}
+/* endfold */
 
-/** react_to_mouse
+/** startfold react_to_mouse
  * React to mouse events
  */
 local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
@@ -608,9 +623,10 @@ local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
     log_add(log_err, "Illegal mouse state: %d\n", mevent.bstate);
     die_gracefully(illegal_state);
   }
-endfn
+}
+/* endfold */
 
-/** process_mouse_drag
+/** startfold process_mouse_drag
  * Update the buffer if dragging is active
  */
 local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
@@ -624,39 +640,51 @@ local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
     write_char(buffer, mevent.y, mevent.x, draw_ch, current_color_id,
                current_attrs);
   } else if (mode == mode_select) {
-    int x, y;
-    try(move(drag_start.y, drag_start.x));
-    for (y = drag_start.y; y < mevent.y; ++y) {
-      try(move(y, drag_start.x));
-      for (x = drag_start.x; x < mevent.x; ++x) {
-        clip_char_under_cursor(clip_buf, x, y);
-      }
-      unclip_char_under_cursor(clip_buf, x + 1, y);
-      unclip_char_under_cursor(clip_buf, x + 2, y);
-    }
-    try(move(mevent.y + 1, drag_start.x));
-    for (x = drag_start.x; x < mevent.x + 2; ++x) {
-      unclip_char_under_cursor(clip_buf, x, y + 1);
-    }
-    try(move(mevent.y + 2, drag_start.x));
-    for (x = drag_start.x; x < mevent.x + 2; ++x) {
-      unclip_char_under_cursor(clip_buf, x, y + 2);
-    }
-    try(move(mevent.y, mevent.x));
+    clip_area(clip_buf, drag_start.y, drag_start.x, mevent.y, mevent.x);
   }
-endfn
+}
+/* endfold */
 
-/** clip_char_under_cursor
+/** startfold clip_area
+ * Clip an area
+ * Write all char in the area startx..endx, starty..endy to the clip buffer
+ * and invert the colors on the screen
+ */
+local fn clip_area(struct CEntry clip_buf[LINES][COLS], int starty, int startx,
+                   int endy, int endx) {
+  int x, y;
+  try(move(drag_start.y, drag_start.x));
+  for (y = drag_start.y; y < mevent.y; ++y) {
+    try(move(y, drag_start.x));
+    for (x = drag_start.x; x < mevent.x; ++x) {
+      clip_char_under_cursor(clip_buf, y, x);
+    }
+    unclip_char_under_cursor(clip_buf, y, x + 1);
+    unclip_char_under_cursor(clip_buf, y, x + 2);
+  }
+  try(move(mevent.y + 1, drag_start.x));
+  for (x = drag_start.x; x < mevent.x + 2; ++x) {
+    unclip_char_under_cursor(clip_buf, y + 1, x);
+  }
+  try(move(mevent.y + 2, drag_start.x));
+  for (x = drag_start.x; x < mevent.x + 2; ++x) {
+    unclip_char_under_cursor(clip_buf, y + 2, x);
+  }
+  try(move(mevent.y, mevent.x));
+}
+/* endfold */
+
+/** startfold clip_char_under_cursor
  * Clip a char under the cursor.
  * Writes the char to the clip buffer and the inverses it on the screen.
  * @param clip_buf The clip buffer
- * @param x The x position
  * @param y The y position
+ * @param x The x position
  *
  * @note Advances the cursor by one
  */
-local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
-                                int y) {
+local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int y,
+                                int x) {
   chtype ch = inch();
 
   /* Write to clip buffer */
@@ -666,14 +694,15 @@ local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
   attr_t attrs = (ch & A_ATTRIBUTES) ^ A_REVERSE;
   attrset(attrs | COLOR_PAIR(ch & A_COLOR));
   try(addch(ch));
-endfn
+}
+/* endfold */
 
-/** unclip_char_under_cursor
+/** startfold unclip_char_under_cursor
  * Unclip a char under the cursor.
  * Removes char from the clip buffer and reverts it (back) on the screen.
  */
-local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
-                                  int y) {
+local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int y,
+                                  int x) {
   if (clip_buf[y][x].ch == 0) {
     return;
   }
@@ -687,9 +716,10 @@ local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
   attr_t attributes = (ch & A_ATTRIBUTES) ^ A_REVERSE;
   attrset(attributes | COLOR_PAIR(ch & A_COLOR));
   try(addch(ch & A_CHARTEXT));
-endfn
+}
+/* endfold */
 
-/** die_gracefully
+/** startfold die_gracefully
  * Do some cleaning up and exit safely.
  * @param sig The signal that caused the exit
  */
@@ -697,6 +727,7 @@ local fn die_gracefully(int sig) {
   endwin();
   log_add(log_err, "Exiting with signal %d\n", sig);
   exit(sig);
-endfn
+}
+/* endfold */
 
-// vim: foldmethod=marker foldmarker=/\*\*,endfn
+// vim: foldmethod=marker foldmarker=startfold,endfold
