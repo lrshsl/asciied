@@ -13,6 +13,8 @@ $(bin): $(csrc)
 	$(cc) -o $@ $(dbgflags) $^
 
 run: $(bin)
+	rm $(builddir)/** || true
+	$(cc) -o $(bin) $(dbgflags) $(csrc)
 	./$(bin)
 
 release: $(csrc)

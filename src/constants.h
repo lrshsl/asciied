@@ -11,8 +11,8 @@
 #define TESTS
 
 /* startfold Color definitions */
+#define DEFAULT 0
 #define BLACK 232
-#define BLACK1 234
 
 #define GRAY0 236 // Dark gray
 #define GRAY1 240
@@ -52,7 +52,7 @@
 
 #define COLORS_LEN 32
 static const u8 COLORS_ARRAY[COLORS_LEN] = {
-  BLACK, BLACK1,
+  DEFAULT, BLACK,
   GRAY0, GRAY1, GRAY2, GRAY3, GRAY4, GRAY5,
   YELLOW0, YELLOW1, YELLOW2, YELLOW3, YELLOW4, YELLOW5,
   RED0, RED1, RED2, RED3, RED4, RED5,

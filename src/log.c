@@ -28,6 +28,9 @@ fn log_add(enum LogLevel lvl, char *fmt, ...) {
   case log_debug:
     prefix = "DEBUG: ";
     break;
+  case log_trace:
+    prefix = "TRACE: ";
+    break;
   case log_all:
     prefix = "LOG  : ";
     break;

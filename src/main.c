@@ -44,7 +44,7 @@ local enum Mode mode = mode_normal;
 
 local char draw_ch = 'X';
 local u8 current_attrs = CE_NONE;
-local u8 current_color_id = 0;
+local u8 current_color_id = 7;
 local MEVENT mevent;
 local char cmdline_buf[1024];
 
@@ -131,15 +131,15 @@ int main(void) {
   fflush(stdout);
 
   /* Colors */
-  if (!has_colors()) {
+  if (!has_colors() || !can_change_color()) {
     log_add(log_err, "Terminal does not support colors\n");
     endwin();
     exit(1);
   } else {
     start_color();
 
-    for (int i = 0; i < COLORS_LEN; i++) {
-      init_pair(i, COLORS_ARRAY[i], 0);
+    for (int i = 0; i < COLORS_LEN; ++i) {
+      init_pair(i, COLORS_ARRAY[i], BLACK);
     }
   }
 
@@ -150,16 +150,18 @@ int main(void) {
   int clip_x = 0;
   int clip_y = 0;
 
-  /* Initialize buffer with spaces */
-  foreach (y, 0, LINES) {
-    foreach (x, 0, COLS) {
+  /* Initialize buffer and screen with spaces */
+  draw_ui();
+  attrset(COLOR_PAIR(1) | A_REVERSE);
+  foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
+    try(move(y, DRAW_AREA_MIN_X));
+    foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
       buffer[y][x].ch = ' ';
       buffer[y][x].color_id = 0;
       buffer[y][x].attrs = CE_NONE;
+      try(addch(' '));
     }
   }
-
-  draw_ui();
   /* endfold */
 
   /** startfold Main loop **/
@@ -576,8 +578,8 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
  */
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
                     u8 color_id, u8 ce_attrs) {
-  y = clamp(y, 1, LINES - 2);
-  x = clamp(x, 0, COLS - 1);
+  y = clamp(y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
+  x = clamp(x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
 
   /* Write to buffer */
   buffer[y][x].ch = ch;
