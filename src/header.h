@@ -30,6 +30,9 @@
     die_gracefully(didnt_try_hard_enough);                                     \
   };
 
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+
 local inline int clamp(int x, int min, int max) {
   if (x < min)
     return min;

@@ -35,6 +35,11 @@
 /** startfold Globals
  * Globals and accessors
  */
+#define DRAW_AREA_MIN_X 0
+#define DRAW_AREA_MAX_X COLS - 2
+#define DRAW_AREA_MIN_Y 1
+#define DRAW_AREA_MAX_Y LINES - 1
+
 local enum Mode mode = mode_normal;
 
 local char draw_ch = 'X';
@@ -60,8 +65,10 @@ local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
                         struct CEntry clip_buf[LINES][COLS]);
 local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
                             struct CEntry clip_buf[LINES][COLS]);
-local fn clip_area(struct CEntry clip_buf[LINES][COLS], int starty, int startx,
-                   int endy, int endx);
+local fn clip_area(struct CEntry clip_buf[LINES][COLS], int start_y,
+                   int start_x, int end_y, int end_x);
+local fn unclip_area(struct CEntry clip_buf[LINES][COLS], int start_y,
+                     int start_x, int end_y, int end_x);
 local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
                                 int y);
 local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
@@ -236,10 +243,11 @@ int main(void) {
     /* Copy and paste */
     case 's':
       /* Select mode */
-      if (mode != mode_select)
+      if (mode != mode_select) {
         mode = mode_select;
-      else
+      } else {
         mode = mode_normal;
+      }
       break;
     case 'p':
       /* TODO */
@@ -356,11 +364,10 @@ quit:
 }
 /* endfold */
 
-    /** startfold clear_cmd_line
-     * Clear command line.
-     */
-    local fn
-    clear_cmd_line() {
+/** startfold clear_cmd_line
+ * Clear command line.
+ */
+local fn clear_cmd_line() {
   try(move(LINES - 1, 0));
   foreach (i, 0, COLS - 1) {
     try(addch(' '));
@@ -601,6 +608,8 @@ local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
     } else {
       /* Start recording drag event */
       is_dragging = true;
+      drag_end.y = mevent.y;
+      drag_end.x = mevent.x;
       drag_start.y = mevent.y;
       drag_start.x = mevent.x;
     }
@@ -640,37 +649,62 @@ local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
     write_char(buffer, mevent.y, mevent.x, draw_ch, current_color_id,
                current_attrs);
   } else if (mode == mode_select) {
-    clip_area(clip_buf, drag_start.y, drag_start.x, mevent.y, mevent.x);
+    mevent.y = clamp(mevent.y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
+    mevent.x = clamp(mevent.x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
+
+    int min_y = min(drag_start.y, mevent.y);
+    int min_x = min(drag_start.x, mevent.x);
+    int max_y = max(drag_start.y, mevent.y);
+    int max_x = max(drag_start.x, mevent.x);
+
+    clip_area(clip_buf, min_y, min_x, max_y, max_x);
+
+    /* Clip area has shrinked -> unclip the edges */
+    if (drag_end.y > max_y) {
+      unclip_area(clip_buf, max_y + 1, min_x, drag_end.y, max_x);
+    } else if (drag_end.y < min_y) {
+      unclip_area(clip_buf, drag_end.y, min_x, min_y - 1, max_x);
+    }
+    if (drag_end.x > max_x) {
+      unclip_area(clip_buf, min_y, max_x + 1, max_y, drag_end.x);
+    } else if (drag_end.x < min_x) {
+      unclip_area(clip_buf, min_y, drag_end.x, max_y, min_x - 1);
+    }
+
+    drag_end.y = mevent.y;
+    drag_end.x = mevent.x;
+    try(move(mevent.y, mevent.x));
   }
 }
 /* endfold */
 
 /** startfold clip_area
  * Clip an area
- * Write all char in the area startx..endx, starty..endy to the clip buffer
+ * Write all char in the area start_x..end_x, start_y..end_y to the clip buffer
  * and invert the colors on the screen
  */
-local fn clip_area(struct CEntry clip_buf[LINES][COLS], int starty, int startx,
-                   int endy, int endx) {
-  int x, y;
-  try(move(drag_start.y, drag_start.x));
-  for (y = drag_start.y; y < mevent.y; ++y) {
-    try(move(y, drag_start.x));
-    for (x = drag_start.x; x < mevent.x; ++x) {
+local fn clip_area(struct CEntry clip_buf[LINES][COLS], int start_y,
+                   int start_x, int end_y, int end_x) {
+  try(move(start_y, start_x));
+  foreach (y, start_y, end_y + 1) {
+    try(move(y, start_x));
+    foreach (x, start_x, end_x + 1) {
       clip_char_under_cursor(clip_buf, y, x);
     }
-    unclip_char_under_cursor(clip_buf, y, x + 1);
-    unclip_char_under_cursor(clip_buf, y, x + 2);
   }
-  try(move(mevent.y + 1, drag_start.x));
-  for (x = drag_start.x; x < mevent.x + 2; ++x) {
-    unclip_char_under_cursor(clip_buf, y + 1, x);
+  try(move(end_y, end_x));
+}
+
+local fn unclip_area(struct CEntry clip_buf[LINES][COLS], int start_y,
+                     int start_x, int end_y, int end_x) {
+  try(move(start_y, start_x));
+  foreach (y, start_y, end_y + 1) {
+    try(move(y, start_x));
+    foreach (x, start_x, end_x + 1) {
+      unclip_char_under_cursor(clip_buf, y, x);
+    }
   }
-  try(move(mevent.y + 2, drag_start.x));
-  for (x = drag_start.x; x < mevent.x + 2; ++x) {
-    unclip_char_under_cursor(clip_buf, y + 2, x);
-  }
-  try(move(mevent.y, mevent.x));
+  try(move(end_y, end_x));
 }
 /* endfold */
 
