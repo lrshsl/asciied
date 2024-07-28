@@ -2,3 +2,6 @@
 # Build deps and binaries
 build/
 
+# Separately managed
+docs/
+

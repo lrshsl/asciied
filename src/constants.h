@@ -1,6 +1,16 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
+#include "header.h"
+
+/* Where to save log and buffer dump */
+#define LOG_FILE_NAME "log/logfile"
+#define BUFFER_DUMP_FILE "log/buffer_dump"
+
+/* Do tests */
+#define TESTS
+
+/* Colors */
 #define BLACK 232
 #define BLACK1 234
 
@@ -40,7 +50,7 @@
 #define GREEN5 154 // Green yellow
 
 #define COLORS_LEN 32
-const int COLORS_ARRAY[COLORS_LEN] = {
+static const u8 COLORS_ARRAY[COLORS_LEN] = {
   BLACK, BLACK1,
   GRAY0, GRAY1, GRAY2, GRAY3, GRAY4, GRAY5,
   YELLOW0, YELLOW1, YELLOW2, YELLOW3, YELLOW4, YELLOW5,

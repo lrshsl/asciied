@@ -1,11 +1,13 @@
 #include <assert.h>
 #include <ncurses.h>
 #include <signal.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "centry.h"
 #include "constants.h"
+#include "header.h"
+#include "log.h"
 
 /* TODO:
  *  - Treat screen as a buffer (inch)
@@ -23,192 +25,34 @@
  *  - Blink support
  */
 
-/* Where to save log and buffer dump */
-#define LOG_FILE_NAME "log/logfile"
-#define BUFFER_DUMP_FILE "log/buffer_dump"
-
-/* Do tests */
-#define TESTS
-
-#define local static
-#define fn void
-
-#define i8 int8_t
-#define i16 int16_t
-#define i32 int32_t
-#define i64 int64_t
-
-#define u8 uint8_t
-#define u16 uint16_t
-#define u32 uint32_t
-#define u64 uint64_t
-
-#define usize size_t
-#define isize intptr_t
-
-/*** Function-like macros and inline functions {{{ ***/
-#define KEY_ESC 27
-#define CTRL(x) ((x) & 0x1f)
-
-/* Try an operation and panic (safely) if operation fails */
-#define try(stmt)                                                              \
-  if ((stmt) == ERR) {                                                         \
-    log_add(log_err, "Try failed in %s on line %d\n", __FILE__, __LINE__);     \
-    finish(didnt_try_hard_enough);                                             \
-  };
-
-local inline int clamp(int x, int min, int max) {
-  if (x < min)
-    return min;
-  if (x > max)
-    return max;
-  return x;
-}
-
-#define loop for (;;)
-
-/* foreach macro
- *
- * Not just for convenience, but also to minimize surface area for errors
- * (straight-forward for loops can't have typos anymore).
- *
- * for (int x = 0; x < 10; ++x) {}
- *
- * becomes:
- *
- * foreach(x, 0, 10) {}
- *
- */
-#define foreach(x, min, max) for (int(x) = (min); ((x) < (max)); (++(x)))
-
-/* }}} */
-
-/*** Types {{{ ***/
-enum CE_Attrs {
-  CE_NONE = 0,
-  CE_REVERSE = 1,
-  CE_BOLD = 2,
-  CE_ITALIC = 4,
-};
-
-/* CEntry {{{
- * Character entry for `buffer` that is associated with a color pair and a set
- * of attributes.
- *
- * Takes up 2 bytes:
- *    - One byte for the char (one bit theoritically unused)
- *    - 5 bits for id of the color pair (allows for 32 different color pairs per
- * image)
- *    - 3 bits for the attributes (bold, italic, reverse or combinations of
- * them)
- */
-struct CEntry {
-  char ch;
-  u8 color_id : 5, attrs : 3;
-};
-
-/* CEntry Helpers
- *
- * Extract color id and attributes from a byte
- *
- * byte : 00010001
- * split: 00010 001
- *          |    |
- *          |    attrs (1 -> CE_REVERSE)
- *          |
- *          color id (2 -> color pair nr. 3 (one indexed))
- */
-#define ce_byte2color_id(x) ((x) & (u8)0x1f)
-#define ce_byte2attrs(x) ((x) >> 5)
-
-/* Convert attributes to curses attributes */
-local attr_t ce_attrs2curs_attr_t(u8 attr) {
-  attr_t result = 0;
-  if (attr & CE_REVERSE)
-    result |= A_REVERSE;
-  if (attr & CE_BOLD)
-    result |= A_BOLD;
-  if (attr & CE_ITALIC)
-    result |= A_ITALIC;
-  return result;
-} /* }}} */
-
-local fn test_ce_attrs_helpers() {
-  assert(ce_byte2attrs(0b00110001) == 0b001);
-  assert(ce_byte2color_id(0b00110001) == 0b10001);
-  assert(ce_attrs2curs_attr_t(0) == 0);
-  assert(
-      ce_attrs2curs_attr_t((A_REVERSE | A_ITALIC) == (A_REVERSE | A_ITALIC)));
-  assert(ce_attrs2curs_attr_t(7) == (A_ITALIC | A_BOLD | A_REVERSE));
-}
-
-/* Error codes. Will be extended further and order might change */
-enum LogLevel {
-  log_none,
-  log_err,
-  log_warn,
-  log_info,
-  log_debug,
-  log_all,
-};
-
-enum Mode {
-  mode_normal,
-  mode_select,
-  mode_drag,
-};
-
-/* Error codes. Will be extended further and order might change */
-typedef enum Err {
-
-  /* Success */
-  ok,
-
-  /* Can usually be recovered */
-  no_input,
-
-  /* Maybe recoverable */
-  file_not_found, /* fopen failed */
-
-  /* Can't be recovered */
-  any_err,
-  alloc_fail,            /* Couldn't allocate enough memory */
-  didnt_try_hard_enough, /* When `try` fails */
-  illegal_state,         /* Assertion failed */
-} Result;
-
-/* Coordinate pair */
-struct Cords {
-  int x, y;
-};
-/* }}} */
-
-/*** Globals and accessors {{{ ***/
+/*** Globals and accessors { ***/
 local enum Mode mode = mode_normal;
 
 local char draw_ch = 'X';
-local u8 cur_attrs = CE_NONE;
-local u8 cur_pair = 0;
+local u8 current_attrs = CE_NONE;
+local u8 current_pair = 0;
 local MEVENT mevent;
 local char cmdline_buf[1024];
-
-/* Log level */
-local enum LogLevel loglvl = log_all;
 
 /* Drag event static variables */
 local struct Cords drag_start = {-1, -1};
 local struct Cords drag_end;
 local bool is_dragging = false;
 
-/* }}} */
+/* } */
 
 /*** Prototypes (forward declarations) {{{ ***/
-local fn log_add(enum LogLevel lvl, char *fmt, ...);
-local fn finish(int sig);
+local fn die_gracefully(int sig);
 
 local Result get_cmd_input();
 local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
                         struct CEntry clip_buf[LINES][COLS]);
+local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
+                            struct CEntry clip_buf[LINES][COLS]);
+local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
+                                int y);
+local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
+                                  int y);
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
 local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file);
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
@@ -228,7 +72,7 @@ int main(void) {
   log_add(log_none, "\n");
   log_add(log_info, "Starting...\n");
 
-  signal(SIGINT, swallow_interrupt); /* Arrange interrupt handler */
+  signal(SIGINT, swallow_interrupt); /* Set up an interrupt handler */
 
   /* NCurses setup */
   initscr();            /* Initialize the curses library */
@@ -244,10 +88,29 @@ int main(void) {
                  NULL)) {
     fprintf(stderr, "No mouse events can be captured (try a different terminal "
                     "or set TERM=xterm)\n");
-  } /* }}} */
+  }
+  /// Note:
+  /// Since I want both mouse reporting and mouse position reporting:
+  ///
+  /// I found that xterm-256color --> colors good
+  /// xterm-1002 --> mouse reporting good
+  ///
+  /// So either include the XM string from xterm-1002 into `infocmp
+  /// xterm-256color` and compile via `tic` as an answer in this thread
+  /// suggests:
+  /// https://stackoverflow.com/questions/29020638/which-term-to-use-to-have-both-256-colors-and-mouse-move-events-in-python-curse#29023361
+  ///
+  /// or simply print this sequence to enable mouse position reporting, and
+  /// leave the terminal on xterm-256color
+  printf("\033[?1003h");
+  fflush(stdout);
 
   /*** Colors {{{ ***/
-  if (has_colors()) {
+  if (!has_colors()) {
+    log_add(log_err, "Terminal does not support colors\n");
+    endwin();
+    exit(1);
+  } else {
     start_color();
 
     for (int i = 0; i < COLORS_LEN; i++) {
@@ -286,13 +149,7 @@ int main(void) {
   }
   /* }}} */
 
-  /* Tests */
-#ifdef TESTS
-  test_ce_attrs_helpers();
-  assert(sizeof(struct CEntry) == 2);
-#endif
-
-  /*** Main loop {{{ ***/
+  /*** Main loop ***/
   loop {
     getyx(stdscr, y, x);
     try(move(y, x));
@@ -322,7 +179,7 @@ int main(void) {
     case KEY_ENTER:
     case CTRL('m'):
     case '\n':
-      write_char(buffer, y, x, draw_ch, cur_pair, cur_attrs);
+      write_char(buffer, y, x, draw_ch, current_pair, current_attrs);
       break;
     case '\b':
       write_char(buffer, y, x, ' ', 0, 0);
@@ -330,13 +187,13 @@ int main(void) {
 
     /* Toggle attributes */
     case 'i':
-      cur_attrs ^= CE_REVERSE;
+      current_attrs ^= CE_REVERSE;
       break;
     case CTRL('i'):
-      cur_attrs ^= CE_ITALIC;
+      current_attrs ^= CE_ITALIC;
       break;
     case CTRL('b'):
-      cur_attrs ^= CE_BOLD;
+      current_attrs ^= CE_BOLD;
       break;
 
     /* New painting */
@@ -360,7 +217,7 @@ int main(void) {
         Result res = load_from_file(buffer, y, x, cmdline_buf);
         if (res != ok && res != no_input) {
           log_add(log_err, "Error loading file: %s\n", cmdline_buf);
-          finish(res);
+          die_gracefully(res);
         }
         draw_buffer(buffer);
       }
@@ -495,46 +352,6 @@ quit:
   return ok;
 } /* }}} */
 
-/* log {{{ */
-local fn log_add(enum LogLevel lvl, char *fmt, ...) {
-  if (loglvl < lvl) {
-    return;
-  }
-
-  FILE *logfile = fopen(LOG_FILE_NAME, "a");
-  va_list args;
-
-  /* Print prefix */
-  char *prefix = "";
-  switch (lvl) {
-  case log_none:
-    break;
-  case log_err:
-    prefix = "ERR  : ";
-    break;
-  case log_warn:
-    prefix = "WARN : ";
-    break;
-  case log_info:
-    prefix = "INFO : ";
-    break;
-  case log_debug:
-    prefix = "DEBUG: ";
-    break;
-  case log_all:
-    prefix = "LOG  : ";
-    break;
-  }
-
-  fprintf(logfile, "%s", prefix);
-
-  /* Print message */
-  va_start(args, fmt);
-  vfprintf(logfile, fmt, args);
-  va_end(args);
-  fclose(logfile);
-} /* }}} */
-
 /* endswith {{{ */
 local bool endswith(char *str, char *suffix) {
   int i = strlen(str) - strlen(suffix);
@@ -553,7 +370,7 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
       struct CEntry *e = &buffer[y][x];
 
       /* Convert attrs */
-      attr_t attrs = ce_attrs2curs_attr_t(e->attrs);
+      attr_t attrs = ce2curs_attrs(e->attrs);
 
       /* Write to screen */
       attrset(attrs | COLOR_PAIR(e->color_id));
@@ -691,8 +508,8 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
 
       /* Flags */
       u8 flags = (u8)fgetc(fp);
-      e->color_id = ce_byte2color_id(flags);
-      e->attrs = ce_byte2attrs(flags);
+      e->color_id = ce_read_color_id(flags); /**< @todo: single instruction */
+      e->attrs = ce_read_attrs(flags);
     }
   }
 
@@ -717,7 +534,7 @@ local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
   buffer[y][x].attrs = ce_attrs;
 
   /* Write to screen */
-  attr_t attrs = ce_attrs2curs_attr_t(ce_attrs);
+  attr_t attrs = ce2curs_attrs(ce_attrs);
   attrset(attrs | COLOR_PAIR(color_id));
   mvaddch(y, x, ch);
   move(y, x); // Don't move on
@@ -728,66 +545,121 @@ local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
  */
 local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
                         struct CEntry clip_buf[LINES][COLS]) {
-  switch (mevent.bstate) {
-  case BUTTON1_DOUBLE_CLICKED:
-  case BUTTON1_CLICKED:
-  case BUTTON1_PRESSED:
+  if (mevent.bstate &
+      (BUTTON1_DOUBLE_CLICKED | BUTTON1_CLICKED | BUTTON1_PRESSED)) {
     /* Start dragging */
     if (mevent.y == 0) {
-      cur_pair = buffer[0][mevent.x].color_id;
-      log_add(log_info, "Selected color: %d\n", cur_pair);
-      break;
+      /* Color selection */
+      current_pair = buffer[0][mevent.x].color_id;
+      log_add(log_info, "Selected color: %d\n", current_pair);
+    } else {
+      /* Start recording drag event */
+      is_dragging = true;
+      drag_start.y = mevent.y;
+      drag_start.x = mevent.x;
     }
-    is_dragging = true;
-    drag_start.y = mevent.y;
-    drag_start.x = mevent.x;
-
-    /* Delete mouse position report */
-    break;
-  case BUTTON1_RELEASED:
+  }
+  if (mevent.bstate & BUTTON1_RELEASED) {
     /* Stop dragging */
     is_dragging = false;
     drag_end.y = mevent.y;
     drag_end.x = mevent.x;
-    break;
-  case REPORT_MOUSE_POSITION:
-    /* Update dragging */
-    if (mode == mode_normal && is_dragging) {
-      /* Draw at the mouse position */
-      write_char(buffer, mevent.y, mevent.x, draw_ch, cur_pair, cur_attrs);
-    } else if (mode == mode_select && is_dragging) {
-      foreach (y, drag_start.y, drag_end.y) {
-        foreach (x, drag_start.x, drag_end.x) {
-
-          /* Write selected region to clip buffer and inverse to screen */
-          struct CEntry *e = &buffer[y][x];
-          char draw_ch = e->ch;
-          short color_pair = e->color_id;
-          attr_t attrs = ce_attrs2curs_attr_t(e->attrs);
-
-          /* Write to screen */
-          attrset(attrs | COLOR_PAIR(color_pair) ^ A_REVERSE);
-          mvaddch(y, x, draw_ch);
-
-          /* Write to clip buffer */
-          clip_buf[y][x] = *e;
-        }
-      }
-    }
-    break;
-  default:
+  }
+  if (mevent.bstate & REPORT_MOUSE_POSITION) {
+    process_mouse_drag(buffer, clip_buf);
+  }
+  if (!(mevent.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED |
+                         BUTTON1_DOUBLE_CLICKED | REPORT_MOUSE_POSITION))) {
     log_add(log_err, "Illegal mouse state: %d\n", mevent.bstate);
-    finish(illegal_state);
+    die_gracefully(illegal_state);
   }
 } /* }}} */
 
-/* finish {{{
- * Clean up and exit safely with a given exit code
+local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
+                            struct CEntry clip_buf[LINES][COLS]) {
+  if (!is_dragging) {
+    return;
+  }
+  /* Update dragging */
+  if (mode == mode_normal) {
+    /* Draw at the mouse position */
+    write_char(buffer, mevent.y, mevent.x, draw_ch, current_pair,
+               current_attrs);
+  } else if (mode == mode_select) {
+    int x, y;
+    for (y = drag_start.y; y < mevent.y; ++y) {
+      try(move(y, drag_start.x));
+      for (x = drag_start.x; x < mevent.x; ++x) {
+
+        clip_char_under_cursor(clip_buf, x, y);
+        /* /1* Read char entry *1/ */
+        /* struct CEntry *e = &buffer[y][x]; */
+
+        /* /1* Write to clip buffer *1/ */
+        /* clip_buf[y][x] = *e; */
+
+        /* /1* Translate CEntry --> char + color + attrs *1/ */
+        /* char draw_ch = e->ch; */
+        /* short color_pair = e->color_id; */
+        /* attr_t attrs = ce_attrs2curs_attr_t(e->attrs); */
+
+        /* /1* Write to screen (with reverse toggled) *1/ */
+        /* attrset((attrs | COLOR_PAIR(color_pair)) ^ A_REVERSE); */
+        /* try(addch(draw_ch)); */
+      }
+      unclip_char_under_cursor(clip_buf, x + 1, y);
+    }
+    try(move(mevent.y + 1, drag_start.x));
+    for (x = drag_start.x; x < mevent.x + 1; ++x) {
+      unclip_char_under_cursor(clip_buf, x, y + 1);
+    }
+  }
+}
+
+/**
+ * Clip a char under the cursor.
+ * Writes the char to the clip buffer and the inverses it on the screen.
+ * @param clip_buf The clip buffer
+ * @param x The x position
+ * @param y The y position
+ *
+ * @note Advances the cursor by one
  */
-local fn finish(int sig) {
+local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
+                                int y) {
+  chtype ch = inch();
+
+  /* Write to clip buffer */
+  clip_buf[y][x] = curs2ce_all(ch);
+
+  /* Write to screen */
+  attr_t attrs = (ch & A_ATTRIBUTES) ^ A_REVERSE;
+  attrset(attrs | COLOR_PAIR(ch & A_COLOR));
+  try(addch(ch));
+}
+
+local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
+                                  int y) {
+  /* Read from screen */
+  chtype ch = inch();
+
+  /* Delete char from clip buffer */
+  clip_buf[y][x].ch = 0;
+
+  /* Re-revert char on screen */
+  attr_t attributes = (ch & A_ATTRIBUTES) ^ A_REVERSE;
+  attrset(attributes | COLOR_PAIR(ch & A_COLOR));
+  try(addch(ch & A_CHARTEXT));
+}
+
+/**
+ * Do some cleaning up and exit safely.
+ * @param sig The signal that caused the exit
+ */
+local fn die_gracefully(int sig) {
   endwin();
   log_add(log_err, "Exiting with signal %d\n", sig);
   exit(sig);
-} /* }}} */
+}
 
-// vim: foldmethod=marker
+// vim: foldmethod=marker foldmarker={,}
