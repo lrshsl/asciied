@@ -5,6 +5,7 @@
 
 #define local static
 #define fn void
+#define endfn } /* Used with vim: fdm=marker fmr=/\*\*,endfn */
 
 #define i8 int8_t
 #define i16 int16_t

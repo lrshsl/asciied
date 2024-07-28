@@ -26,9 +26,9 @@
 #define YELLOW2 214
 #define YELLOW3 208
 #define YELLOW4 202
-#define YELLOW5 166 // Orange
+#define YELLOW5 196 // Orange
 
-#define RED0 196 // Red
+#define RED0 166 // Red
 #define RED1 124
 #define RED2 88
 #define RED3 52

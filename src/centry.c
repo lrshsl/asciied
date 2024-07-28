@@ -52,10 +52,7 @@ u8 curs2ce_attrs(attr_t attr) {
   }
 }
 
-/* Curses color_id --> CEntry color_id */
-chtype ce2curs_color_id(u8 color_id) { return (chtype)color_id; }
-/* Curses color_id <-- CEntry color_id */
-u8 curs2ce_color_id(chtype color_id) { return (u8)color_id; }
+/* Curses color_id <-> CEntry color_id are macros */
 
 /* Curses chtype --> CEntry */
 struct CEntry curs2ce_all(chtype ch) {
