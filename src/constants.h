@@ -10,55 +10,37 @@
 /* Do tests */
 #define TESTS
 
-/* startfold Color definitions */
-#define DEFAULT 0
-#define BLACK 232
-
-#define GRAY0 236 // Dark gray
-#define GRAY1 240
-#define GRAY2 244
-#define GRAY3 248
-#define GRAY4 252
-#define GRAY5 255 // White
-
-#define YELLOW0 226 // Yellow
-#define YELLOW1 220
-#define YELLOW2 214
-#define YELLOW3 208
-#define YELLOW4 202
-#define YELLOW5 196 // Orange
-
-#define RED0 166 // Red
-#define RED1 124
-#define RED2 88
-#define RED3 52
-#define RED4 127
-#define RED5 92 // Dark red
-
-#define BLUE0 18 // Dark blue
-#define BLUE1 20
-#define BLUE2 27
-#define BLUE3 39
-#define BLUE4 37
-#define BLUE5 51 // Cyan
-
-#define GREEN0 46 // Light green
-#define GREEN1 40
-#define GREEN2 34
-#define GREEN3 28
-#define GREEN4 118
-#define GREEN5 154 // Green yellow
-/* endfold */
-
 #define COLORS_LEN 32
-static const u8 COLORS_ARRAY[COLORS_LEN] = {
-  DEFAULT, BLACK,
-  GRAY0, GRAY1, GRAY2, GRAY3, GRAY4, GRAY5,
-  YELLOW0, YELLOW1, YELLOW2, YELLOW3, YELLOW4, YELLOW5,
-  RED0, RED1, RED2, RED3, RED4, RED5,
-  BLUE0, BLUE1, BLUE2, BLUE3, BLUE4, BLUE5,
-  GREEN0, GREEN1, GREEN2, GREEN3, GREEN4, GREEN5
+/* clang-format off */
+static const u8 FG_COLOR_COLLECTION_DEFAULT[COLORS_LEN] = {
+  0,                            // Terminal default
+  232,                          // Black
+  236, 240, 244, 248, 252,      // Gray, dark to lighter
+  255,                          // White
+  226, 220, 214, 208, 202,      // Yellow --> Orange
+  196,                          // Red
+  166, 124, 88,  52,            // Brown
+  127, 92,                      // Violet, Violet blue
+  18,  20,  27,  39,            // Dark blue --> Light blue
+  37,  51,                      // Turquoice, Cyan
+  46,  40,  34,  28,            // Light green --> Dark green
+  118, 154,                     // Neon green, green yellow
 };
+enum DefaultCollection {
+  DefaultCollection_DEFAULT,
+  DefaultCollection_BLACK,
+  DefaultCollection_GRAY_DARKEST, DefaultCollection_GRAY_DARKER, DefaultCollection_GRAY, DefaultCollection_GRAY_LIGHTER, DefaultCollection_GRAY_LIGHTEST,
+  DefaultCollection_WHITE,
+  DefaultCollection_YELLOW, DefaultCollection_YELLOW_DARK, DefaultCollection_YELLOW_DARKEST, DefaultCollection_ORANGE_LIGHT, DefaultCollection_ORANGE,
+  DefaultCollection_RED,
+  DefaultCollection_BROWN_LIGHTEST, DefaultCollection_BROWN_LIGHT, DefaultCollection_BROWN, DefaultCollection_BROWN_DARK,
+  DefaultCollection_VIOLET, DefaultCollection_VIOLET_BLUE,
+  DefaultCollection_BLUE_DARKEST, DefaultCollection_BLUE_DARK, DefaultCollection_BLUE, DefaultCollection_BLUE_LIGHT,
+  DefaultCollection_BLUE_TURQUOISE, DefaultCollection_CYAN,
+  DefaultCollection_GREEN_LIGHT, DefaultCollection_GREEN, DefaultCollection_GREEN_DARK, DefaultCollection_GREEN_DARKEST,
+  DefaultCollection_GREEN_NEON, DefaultCollection_GREEN_YELLOW
+};
+/* clang-format on */
 
 #endif
 

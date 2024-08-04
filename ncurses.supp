@@ -1,0 +1,14 @@
+{
+	initscr_leak
+   Memcheck:Leak
+	...
+   fun:initscr
+   ...
+}
+{
+	init_pair_leak
+   Memcheck:Leak
+	...
+   fun:_nc_init_pair
+   ...
+}

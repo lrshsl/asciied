@@ -38,13 +38,15 @@
 #define DRAW_AREA_MIN_X 0
 #define DRAW_AREA_MAX_X COLS - 2
 #define DRAW_AREA_MIN_Y 1
-#define DRAW_AREA_MAX_Y LINES - 1
+#define DRAW_AREA_MAX_Y LINES - 3
+
+const int UI_BG_ATTRS = COLOR_PAIR(DefaultCollection_GRAY) | A_REVERSE;
 
 local enum Mode mode = mode_normal;
 
 local char draw_ch = 'X';
 local u8 current_attrs = CE_NONE;
-local u8 current_color_id = 7;
+local u8 current_color_id = DefaultCollection_WHITE;
 local MEVENT mevent;
 local char cmdline_buf[1024];
 
@@ -58,13 +60,37 @@ local bool is_dragging = false;
  * Forward declarations
  */
 local fn die_gracefully(int sig);
+local fn swallow_interrupt(int sig) {
+  log_add(log_debug, "Caught signal %d\n", sig);
+}
 
-local Result get_cmd_input();
-local fn clear_cmd_line();
 local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
                         struct CEntry clip_buf[LINES][COLS]);
 local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
                             struct CEntry clip_buf[LINES][COLS]);
+
+// Command line
+local Result get_cmd_input();
+local fn clear_cmd_line();
+
+// Status line
+local fn notify(char *msg);
+local fn draw_status_line();
+local fn clear_status_line();
+local fn set_color(u8 color_id);
+local fn set_mode(enum Mode new_mode);
+
+// Buffer + Window
+local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
+local fn draw_ui();
+local fn dump_buffer_readable(struct CEntry buffer[LINES][COLS], FILE *file);
+local fn save_to_file(struct CEntry buffer[LINES][COLS], char *filename);
+local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x,
+                            char *filename);
+local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
+                    u8 color_id, u8 ce_attr);
+
+/* Clipping */
 local fn clip_area(struct CEntry clip_buf[LINES][COLS], int start_y,
                    int start_x, int end_y, int end_x);
 local fn unclip_area(struct CEntry clip_buf[LINES][COLS], int start_y,
@@ -73,23 +99,13 @@ local fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
                                 int y);
 local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int x,
                                   int y);
-local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
-local fn draw_ui();
-local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file);
-local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
-                    u8 color_id, u8 ce_attr);
-local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename);
-local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x,
-                            char *filename);
 
-#define COLOR_ID_AT(x) ((x) / (COLS / COLORS_LEN))
-
-local fn swallow_interrupt(int sig) {
-  log_add(log_debug, "Caught signal %d\n", sig);
-}
+#define PALETTE_COLOR_ID_AT(x) ((x) / (COLS / COLORS_LEN))
 /* endfold */
 
-/** startfold main
+/* startfold Main */
+
+/** startfold init
  * Main function
  */
 int main(void) {
@@ -112,16 +128,17 @@ int main(void) {
                      BUTTON1_DOUBLE_CLICKED | REPORT_MOUSE_POSITION,
                  NULL)) {
     fprintf(stderr, "No mouse events can be captured (try a different terminal "
-                    "or set TERM=xterm)\n");
+                    "or try 'TERM=xterm-256color asciied')\n");
   }
   /// Note:
-  /// Since I want both mouse reporting and mouse position reporting:
+  /// Since I want both color support and mouse position reporting:
   ///
-  /// I found that xterm-256color --> colors good
-  /// xterm-1002 --> mouse reporting good
+  /// I found that
+  /// xterm-256color  --> colors good
+  /// xterm-1002      --> mouse reporting good
   ///
   /// So either include the XM string from xterm-1002 into `infocmp
-  /// xterm-256color` and compile via `tic` as an answer in this thread
+  /// xterm-256color` and compile via `tic`, as an answer in this thread
   /// suggests:
   /// https://stackoverflow.com/questions/29020638/which-term-to-use-to-have-both-256-colors-and-mouse-move-events-in-python-curse#29023361
   ///
@@ -132,39 +149,41 @@ int main(void) {
 
   /* Colors */
   if (!has_colors() || !can_change_color()) {
-    log_add(log_err, "Terminal does not support colors\n");
+    log_add(log_err, "Terminal does not support colors. Maybe try "
+                     "'TERM=xterm-256color asciied'\n");
     endwin();
     exit(1);
   } else {
     start_color();
 
     for (int i = 0; i < COLORS_LEN; ++i) {
-      init_pair(i, COLORS_ARRAY[i], BLACK);
+      init_pair(i, FG_COLOR_COLLECTION_DEFAULT[i],
+                FG_COLOR_COLLECTION_DEFAULT[DefaultCollection_BLACK]);
     }
   }
 
   /* Initialization */
   int x, y;
-  struct CEntry buffer[LINES][COLS];
+  struct CEntry buffer[LINES][COLS]; // TODO: strip size to DRAWABLE_AREA
   struct CEntry clip_buf[LINES][COLS];
   int clip_x = 0;
   int clip_y = 0;
 
   /* Initialize buffer and screen with spaces */
   draw_ui();
-  attrset(COLOR_PAIR(1) | A_REVERSE);
+  attrset(COLOR_PAIR(current_color_id));
   foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
-    try(move(y, DRAW_AREA_MIN_X));
+    try(move(y, 0));
     foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
       buffer[y][x].ch = ' ';
-      buffer[y][x].color_id = 0;
+      buffer[y][x].color_id = current_color_id;
       buffer[y][x].attrs = CE_NONE;
       try(addch(' '));
     }
   }
   /* endfold */
 
-  /** startfold Main loop **/
+  /** startfold loop **/
   loop {
     getyx(stdscr, y, x);
     try(move(y, x));
@@ -172,6 +191,11 @@ int main(void) {
 
     /* Update */
     int ch = getch();
+
+    // Save and load colors
+    if (ch >= '0' && ch <= '9') {
+      log_add(log_debug, "Selected quick color palette %d\n", ch - '0');
+    }
 
     /* Change draw char with `space + new_char` */
     switch (ch) {
@@ -190,16 +214,6 @@ int main(void) {
     case CTRL('q'):
       goto quit;
 
-    /* Write and delete under the cursor */
-    case KEY_ENTER:
-    case CTRL('m'): /* '\r' */
-    case '\n':
-      write_char(buffer, y, x, draw_ch, current_color_id, current_attrs);
-      break;
-    case '\b': /* '^h' */
-      write_char(buffer, y, x, ' ', 0, 0);
-      break;
-
     /* Toggle attributes */
     case 'i':
       current_attrs ^= CE_REVERSE;
@@ -217,7 +231,8 @@ int main(void) {
           (strcmp(cmdline_buf, "") != 0 || strcmp(cmdline_buf, "y") != 0 ||
            strcmp(cmdline_buf, "Y") != 0)) {
         memset(buffer, ' ', sizeof(buffer));
-        draw_ui(); /* No need to redraw everything */
+        draw_ui();
+        draw_buffer(buffer);
       }
       break;
 
@@ -229,12 +244,15 @@ int main(void) {
     /* Save and load file */
     case CTRL('s'):
       if (get_cmd_input() == ok)
-        write_to_file(buffer, cmdline_buf);
+        save_to_file(buffer, cmdline_buf);
       break;
     case CTRL('o'):
       if (get_cmd_input() == ok) {
         Result res = load_from_file(buffer, y, x, cmdline_buf);
-        if (res != ok && res != no_input) {
+        if (res == file_not_found) {
+          log_add(log_err, "File not found: %s\n", cmdline_buf);
+          break;
+        } else if (res != ok && res != no_input) {
           log_add(log_err, "Error loading file: %s\n", cmdline_buf);
           die_gracefully(res);
         }
@@ -246,9 +264,9 @@ int main(void) {
     case 's':
       /* Select mode */
       if (mode != mode_select) {
-        mode = mode_select;
+        set_mode(mode_select);
       } else {
-        mode = mode_normal;
+        set_mode(mode_normal);
       }
       break;
     case 'p':
@@ -271,6 +289,16 @@ int main(void) {
       try(move(y + 1, x));
       break;
 
+    /* Write and delete under the cursor */
+    case KEY_ENTER:
+    case CTRL('m'): /* '\r' */
+    case '\n':
+      write_char(buffer, y, x, draw_ch, current_color_id, current_attrs);
+      break;
+    case '\b': /* '^h' */
+      write_char(buffer, y, x, ' ', 0, 0);
+      break;
+
     /* Mouse event */
     case KEY_MOUSE:
       try(getmouse(&mevent));
@@ -282,7 +310,7 @@ int main(void) {
   }
   /* endfold */
 
-  /** startfold Quit **/
+  /** startfold quit **/
 quit:
   endwin();
   printf("Terminal size: %dx%d\n", COLS, LINES);
@@ -291,7 +319,7 @@ quit:
   /* Dump buffer to file */
 #ifdef BUFFER_DUMP_FILE
   FILE *fp = fopen(BUFFER_DUMP_FILE, "w");
-  dump_buffer(buffer, fp);
+  dump_buffer_readable(buffer, fp);
   fclose(fp);
   printf("Buffer dumped to log/buffer_dump\n");
 #endif
@@ -299,6 +327,10 @@ quit:
   exit(0);
 }
 /* endfold */
+
+/* endfold Main */
+
+/* startfold Command line input */
 
 /** startfold get_cmd_input
  * Get input from user via cmd line. User input is written to `cmdline_buf`.
@@ -335,6 +367,7 @@ local Result get_cmd_input() {
 
     /* Delete a character */
     case '\b':
+    case CTRL('g'):
       if (i > 0) {
         cmdline_buf[i - 1] = '\0';
         try(addstr("\b \b"));
@@ -371,11 +404,78 @@ quit:
  */
 local fn clear_cmd_line() {
   try(move(LINES - 1, 0));
-  foreach (i, 0, COLS - 1) {
-    try(addch(' '));
-  }
+  try(clrtoeol());
+  try(attrset(UI_BG_ATTRS));
 }
 /* endfold */
+
+/* endfold Command line input */
+
+/* startfold Status line */
+local fn notify(char *msg);
+
+// Length: excluding NULL terminator
+#define COLOR_INDICATOR_LENGTH 3
+#define COLOR_INDICATOR_RIGHT_OFFSET 0
+#define COLOR_INDICATOR_STRING "   "
+
+// Length: excluding NULL terminator
+#define MODE_INDICATOR_LENGTH 7
+const char *mode_indicator() {
+  switch (mode) {
+  case mode_normal:
+    return "NORMAL ";
+  case mode_select:
+    return "SELECT ";
+  case mode_preview:
+    return "PREVIEW";
+  case mode_drag:
+    return " DRAG  ";
+  }
+  log_add(log_err, "Unknown mode: %d\n", mode);
+  return "ERR";
+}
+
+local fn draw_status_line() {
+  int y = getcury(stdscr);
+  int x = getcurx(stdscr);
+
+  move(LINES - 2, 0);
+  attrset(UI_BG_ATTRS);
+  try(clrtoeol());
+
+  // Draw mode
+  move(LINES - 2, COLS / 2 - MODE_INDICATOR_LENGTH / 2 - 1);
+  attrset(COLOR_PAIR(DefaultCollection_WHITE));
+  const char *mode_str = mode_indicator();
+  try(addnstr(mode_str, MODE_INDICATOR_LENGTH));
+
+  // Draw color indicator
+  move(LINES - 2, COLS - COLOR_INDICATOR_LENGTH - 1 - COLOR_INDICATOR_RIGHT_OFFSET);
+  attrset(COLOR_PAIR(current_color_id) | A_REVERSE);
+  try(addnstr(COLOR_INDICATOR_STRING, COLOR_INDICATOR_LENGTH));
+
+#ifdef TESTS
+  assert(strlen(COLOR_INDICATOR_STRING) == COLOR_INDICATOR_LENGTH);
+  assert(strlen(mode_str) == MODE_INDICATOR_LENGTH);
+#endif // TESTS
+
+  // Go back
+  try(move(y, x));
+}
+
+local fn set_color(u8 color_id) {
+  current_color_id = color_id;
+  draw_status_line();
+  log_add(log_info, "Selected color: %d\n", current_color_id);
+}
+
+local fn set_mode(enum Mode new_mode) {
+  mode = new_mode;
+  draw_status_line();
+  log_add(log_info, "Changed mode: %d\n", mode);
+}
+/* endfold Status line */
 
 /** startfold endswith
  * Check if a given string ends with a given suffix
@@ -385,6 +485,32 @@ local bool endswith(char *str, char *suffix) {
   if (i < 0)
     return false;
   return strcmp(str + i, suffix) == 0;
+}
+/* endfold */
+
+/* startfold Window & Buffer */
+
+/** startfold draw_ui
+ * Draw all elements, that are not part of the image
+ */
+local fn draw_ui() {
+  // Draw color palette
+  move(0, 0);
+  foreach (color_id, 0, COLORS_LEN) {
+    attrset(COLOR_PAIR(color_id) | A_REVERSE);
+    foreach (ltr, 0, COLS / COLORS_LEN) {
+      addch(' ');
+      /* struct CEntry *e = */
+      /*     &buffer[0][color_id * palette_element_width_chars + ltr]; */
+      /* e->ch = 'X'; */
+      /* e->color_id = color_id; */
+      /* e->attrs = CE_NONE; */
+    }
+  }
+  // TODO: draw quick palette
+  // Draw status line
+  draw_status_line();
+  clear_cmd_line();
 }
 /* endfold */
 
@@ -410,29 +536,11 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
 }
 /* endfold */
 
-/** startfold draw_ui
- * Draw all elements, that are not part of the image
+/** startfold dump_buffer_readable
+ * Write the buffer to stdout (or another file), first the chars, then the
+ * attributes [debug function]
  */
-local fn draw_ui() {
-  move(0, 0);
-  foreach (color_id, 0, COLORS_LEN) {
-    attrset(COLOR_PAIR(color_id) | A_REVERSE);
-    foreach (ltr, 0, COLS / COLORS_LEN) {
-      addch(' ');
-      /* struct CEntry *e = */
-      /*     &buffer[0][color_id * palette_element_width_chars + ltr]; */
-      /* e->ch = 'X'; */
-      /* e->color_id = color_id; */
-      /* e->attrs = CE_NONE; */
-    }
-  }
-}
-/* endfold */
-
-/** startfold dump_buffer
- * Write the buffer to stdout (or another file) [debug function]
- */
-local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file) {
+local fn dump_buffer_readable(struct CEntry buffer[LINES][COLS], FILE *file) {
   fprintf(file, "<--- Buffer dump --->\nCE%d,%d\n", LINES, COLS);
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
@@ -452,10 +560,10 @@ local fn dump_buffer(struct CEntry buffer[LINES][COLS], FILE *file) {
 }
 /* endfold */
 
-/** startfold write_to_file
+/** startfold save_to_file
  * Write the buffer to the file
  */
-local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
+local fn save_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 
   /* Open the file */
   char file[128];
@@ -496,11 +604,11 @@ local fn write_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 /** startfold load_from_file
  * Load the buffer from the file
  */
-local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
-                            int mouse_x, char *filename) {
+local Result load_from_file(struct CEntry buffer[LINES][COLS], int insert_pos_y,
+                            int insert_pos_x, char *filename) {
 
   /* Open the file */
-  char file[128];
+  static char file[128];
 
   /* Check length of filename */
   if (strlen(filename) > 128) {
@@ -547,9 +655,13 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
     return alloc_fail;
   }
 
+  /* Insert at mouse position, or move away if not enough space */
+  insert_pos_y = min(insert_lines + insert_pos_y, LINES - insert_lines);
+  insert_cols = min(insert_cols + insert_pos_x, COLS - insert_cols);
+
   /* Read to clip buffer */
-  foreach (y, mouse_y, mouse_y + insert_lines) {
-    foreach (x, mouse_x, mouse_x + insert_cols) {
+  foreach (y, insert_pos_y, insert_pos_y + insert_lines) {
+    foreach (x, insert_pos_x, insert_pos_x + insert_cols) {
 
       /* Read two bytes and change the corresponding entry in `clip_buf` */
       struct CEntry *e = &buffer[y][x];
@@ -572,113 +684,7 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int mouse_y,
 }
 /* endfold */
 
-/** startfold write_char
- * Write a char to the screen and make the corresponding entry into the
- * buffer
- */
-local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
-                    u8 color_id, u8 ce_attrs) {
-  y = clamp(y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
-  x = clamp(x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
-
-  /* Write to buffer */
-  buffer[y][x].ch = ch;
-  buffer[y][x].color_id = color_id;
-  buffer[y][x].attrs = ce_attrs;
-
-  /* Write to screen */
-  attr_t attrs = ce2curs_attrs(ce_attrs);
-  attrset(attrs | COLOR_PAIR(color_id));
-  mvaddch(y, x, ch);
-  move(y, x); // Don't move on
-}
-/* endfold */
-
-/** startfold react_to_mouse
- * React to mouse events
- */
-local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
-                        struct CEntry clip_buf[LINES][COLS]) {
-  if (mevent.bstate &
-      (BUTTON1_DOUBLE_CLICKED | BUTTON1_CLICKED | BUTTON1_PRESSED)) {
-
-    /* Mouse click */
-    if (mevent.y == 0) {
-      /* Color selection */
-      current_color_id = COLOR_ID_AT(mevent.x);
-      log_add(log_info, "Selected color: %d\n", current_color_id);
-    } else {
-      /* Start recording drag event */
-      is_dragging = true;
-      drag_end.y = mevent.y;
-      drag_end.x = mevent.x;
-      drag_start.y = mevent.y;
-      drag_start.x = mevent.x;
-    }
-  }
-
-  /* Mouse release */
-  if (mevent.bstate & BUTTON1_RELEASED) {
-    /* Stop dragging */
-    is_dragging = false;
-    drag_end.y = mevent.y;
-    drag_end.x = mevent.x;
-  }
-
-  /* Mouse drag */
-  if (mevent.bstate & REPORT_MOUSE_POSITION) {
-    process_mouse_drag(buffer, clip_buf);
-  }
-  if (!(mevent.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED |
-                         BUTTON1_DOUBLE_CLICKED | REPORT_MOUSE_POSITION))) {
-    log_add(log_err, "Illegal mouse state: %d\n", mevent.bstate);
-    die_gracefully(illegal_state);
-  }
-}
-/* endfold */
-
-/** startfold process_mouse_drag
- * Update the buffer if dragging is active
- */
-local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
-                            struct CEntry clip_buf[LINES][COLS]) {
-  if (!is_dragging) {
-    return;
-  }
-  /* Update dragging */
-  if (mode == mode_normal) {
-    /* Draw at the mouse position */
-    write_char(buffer, mevent.y, mevent.x, draw_ch, current_color_id,
-               current_attrs);
-  } else if (mode == mode_select) {
-    mevent.y = clamp(mevent.y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
-    mevent.x = clamp(mevent.x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
-
-    int min_y = min(drag_start.y, mevent.y);
-    int min_x = min(drag_start.x, mevent.x);
-    int max_y = max(drag_start.y, mevent.y);
-    int max_x = max(drag_start.x, mevent.x);
-
-    clip_area(clip_buf, min_y, min_x, max_y, max_x);
-
-    /* Clip area has shrinked -> unclip the edges */
-    if (drag_end.y > max_y) {
-      unclip_area(clip_buf, max_y + 1, min_x, drag_end.y, max_x);
-    } else if (drag_end.y < min_y) {
-      unclip_area(clip_buf, drag_end.y, min_x, min_y - 1, max_x);
-    }
-    if (drag_end.x > max_x) {
-      unclip_area(clip_buf, min_y, max_x + 1, max_y, drag_end.x);
-    } else if (drag_end.x < min_x) {
-      unclip_area(clip_buf, min_y, drag_end.x, max_y, min_x - 1);
-    }
-
-    drag_end.y = mevent.y;
-    drag_end.x = mevent.x;
-    try(move(mevent.y, mevent.x));
-  }
-}
-/* endfold */
+/* startfold Clipping */
 
 /** startfold clip_area
  * Clip an area
@@ -752,6 +758,117 @@ local fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int y,
   attr_t attributes = (ch & A_ATTRIBUTES) ^ A_REVERSE;
   attrset(attributes | COLOR_PAIR(ch & A_COLOR));
   try(addch(ch & A_CHARTEXT));
+}
+/* endfold */
+
+/* endfold Clipping */
+
+/** startfold write_char
+ * Write a char to the screen and make the corresponding entry into the
+ * buffer
+ */
+local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
+                    u8 color_id, u8 ce_attrs) {
+  y = clamp(y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
+  x = clamp(x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
+
+  /* Write to buffer */
+  buffer[y][x].ch = ch;
+  buffer[y][x].color_id = color_id;
+  buffer[y][x].attrs = ce_attrs;
+
+  /* Write to screen */
+  attr_t attrs = ce2curs_attrs(ce_attrs);
+  attrset(attrs | COLOR_PAIR(color_id));
+  mvaddch(y, x, ch);
+  move(y, x); // Don't move on
+}
+/* endfold */
+
+/* endfold Window & Buffer */
+
+/** startfold react_to_mouse
+ * React to mouse events
+ */
+local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
+                        struct CEntry clip_buf[LINES][COLS]) {
+  if (mevent.bstate &
+      (BUTTON1_DOUBLE_CLICKED | BUTTON1_CLICKED | BUTTON1_PRESSED)) {
+
+    /* Mouse click */
+    if (mevent.y == 0) {
+      /* Color selection */
+      set_color(PALETTE_COLOR_ID_AT(mevent.x));
+    } else {
+      /* Start recording drag event */
+      is_dragging = true;
+      drag_end.y = mevent.y;
+      drag_end.x = mevent.x;
+      drag_start.y = mevent.y;
+      drag_start.x = mevent.x;
+    }
+  }
+
+  /* Mouse release */
+  if (mevent.bstate & BUTTON1_RELEASED) {
+    /* Stop dragging */
+    is_dragging = false;
+    drag_end.y = mevent.y;
+    drag_end.x = mevent.x;
+  }
+
+  /* Mouse drag */
+  if (mevent.bstate & REPORT_MOUSE_POSITION) {
+    process_mouse_drag(buffer, clip_buf);
+  }
+  if (!(mevent.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED |
+                         BUTTON1_DOUBLE_CLICKED | REPORT_MOUSE_POSITION))) {
+    log_add(log_err, "Illegal mouse state: %d\n", mevent.bstate);
+    die_gracefully(illegal_state);
+  }
+}
+/* endfold */
+
+/** startfold process_mouse_drag
+ * Update the buffer if dragging is active
+ */
+local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
+                            struct CEntry clip_buf[LINES][COLS]) {
+  if (!is_dragging) {
+    return;
+  }
+  /* Update dragging */
+  if (mode == mode_normal) {
+    /* Draw at the mouse position */
+    write_char(buffer, mevent.y, mevent.x, draw_ch, current_color_id,
+               current_attrs);
+  } else if (mode == mode_select) {
+    mevent.y = clamp(mevent.y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
+    mevent.x = clamp(mevent.x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
+
+    int min_y = min(drag_start.y, mevent.y);
+    int min_x = min(drag_start.x, mevent.x);
+    int max_y = max(drag_start.y, mevent.y);
+    int max_x = max(drag_start.x, mevent.x);
+
+    clip_area(clip_buf, min_y, min_x, max_y, max_x);
+
+    /* Clip area has shrinked -> unclip the edges */
+    if (drag_end.y > max_y) {
+      unclip_area(clip_buf, max_y + 1, min_x, drag_end.y, max_x);
+    } else if (drag_end.y < min_y) {
+      unclip_area(clip_buf, drag_end.y, min_x, min_y - 1, max_x);
+    }
+    if (drag_end.x > max_x) {
+      unclip_area(clip_buf, min_y, max_x + 1, max_y, drag_end.x);
+    } else if (drag_end.x < min_x) {
+      unclip_area(clip_buf, min_y, drag_end.x, max_y, min_x - 1);
+    }
+
+    drag_end.y = mevent.y;
+    drag_end.x = mevent.x;
+    try(move(mevent.y, mevent.x));
+  }
 }
 /* endfold */
 

@@ -65,9 +65,10 @@ chtype ce2curs_all(struct CEntry ce);
 
 /*** Editor ***/
 enum Mode {
-  mode_normal,
-  mode_select,
-  mode_drag,
+  mode_normal,  /**< (Normal | Draw) mode */
+  mode_select,  /**< Select area in image (unstable) */
+  mode_drag,    /**< Drag a selection (unimplemented) */
+  mode_preview, /**< (Paste | file load) preview (unimplemented) */
 };
 
 /* Error codes. Will be extended further and order might change */
