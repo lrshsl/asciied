@@ -3,5 +3,5 @@
 build/
 
 # Separately managed
-docs/
+docs/generated/
 
