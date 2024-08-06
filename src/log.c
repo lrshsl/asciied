@@ -9,6 +9,10 @@ fn log_add(enum LogLevel lvl, char *fmt, ...) {
   }
 
   FILE *logfile = fopen(LOG_FILE_NAME, "a");
+  if (logfile == NULL) {
+    fprintf(stderr, "Error: Could not open logfile: %s\n", LOG_FILE_NAME);
+    return;
+  }
   va_list args;
 
   /* Print prefix */

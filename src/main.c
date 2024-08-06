@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ncurses.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,6 +10,8 @@
 #include "header.h"
 #include "log.h"
 
+#define TESTS
+
 /** startfold TODO:
  *  - Treat screen as a buffer (inch)
  *  - Split project into different files
@@ -16,7 +19,7 @@
  *    - centry: storage and related (also drawing at the same time)
  *    - cursed: thin wrapper around ncurses (try and stuff integrated?)
  *    - log: logging and errors
- *    - cmd_line: command line input
+ *    - cmdline: command line input
  *  - Add tests
  *
  * FEATURES:
@@ -35,25 +38,57 @@
 /** startfold Globals
  * Globals and accessors
  */
+const char *SPACES_100 = "                                                  "
+                         "                                                  ";
+
 #define DRAW_AREA_MIN_X 0
 #define DRAW_AREA_MAX_X COLS - 2
 #define DRAW_AREA_MIN_Y 1
 #define DRAW_AREA_MAX_Y LINES - 3
+#define DRAW_AREA_WIDTH COLS - 1
+#define DRAW_AREA_HEIGHT LINES - 2
+
+// Length: excluding NULL terminator
+#define COLOR_INDICATOR_LEN 3
+#define COLOR_INDICATOR_RIGHT_OFFSET 0
+#define COLOR_INDICATOR_STRING SPACES_100
+
+// Length: excluding NULL terminator
+#define MODE_INDICATOR_LEN 10
+
+#define NOTIFY_AREA_Y LINES - 2
+#define NOTIFY_AREA_X 0
+#define NOTIFY_AREA_WIDTH COLS / 2 - MODE_INDICATOR_LEN
+
+#define CURSOR_INVISIBLE 0
+#define CURSOR_VISIBLE 1
+
+#define SAVE_DIR "./saves"
+#define SAVE_DIR_LEN 7
+
+#define FILE_EXTENSION ".centry"
+#define FILE_EXTENSION_LEN 7
 
 const int UI_BG_ATTRS = COLOR_PAIR(DefaultCollection_GRAY) | A_REVERSE;
+const int UI_MODE_INDICATOR_ATTRS = COLOR_PAIR(DefaultCollection_WHITE);
+const int CMD_LINE_ATTRS = COLOR_PAIR(DefaultCollection_WHITE);
+const int NOTIFY_ATTRS = COLOR_PAIR(DefaultCollection_GRAY) | A_REVERSE;
 
 local enum Mode mode = mode_normal;
 
-local char draw_ch = 'X';
+local char current_char = 'X';
 local u8 current_attrs = CE_NONE;
-local u8 current_color_id = DefaultCollection_WHITE;
+local u8 current_color_id = DEFAULT_COLOR_ID;
 local MEVENT mevent;
 local char cmdline_buf[1024];
+
+local char currently_open_file[128] = {0};
 
 /* Drag event static variables */
 local struct Cords drag_start = {-1, -1};
 local struct Cords drag_end;
 local bool is_dragging = false;
+
 /* endfold */
 
 /** startfold Prototypes
@@ -71,20 +106,25 @@ local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
 
 // Command line
 local Result get_cmd_input();
-local fn clear_cmd_line();
+local fn clear_cmdline();
+local fn prefill_cmdline(char *str, int n);
 
 // Status line
 local fn notify(char *msg);
+local fn clear_notifications();
 local fn draw_status_line();
 local fn clear_status_line();
 local fn set_color(u8 color_id);
 local fn set_mode(enum Mode new_mode);
 
 // Buffer + Window
+local fn clear_draw_area(struct CEntry buffer[LINES][COLS]);
+local fn fill_buffer(struct CEntry buffer[LINES][COLS],
+                     struct CEntry fill_centry);
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]);
 local fn draw_ui();
 local fn dump_buffer_readable(struct CEntry buffer[LINES][COLS], FILE *file);
-local fn save_to_file(struct CEntry buffer[LINES][COLS], char *filename);
+local Result save_to_file(struct CEntry buffer[LINES][COLS], char *filename);
 local Result load_from_file(struct CEntry buffer[LINES][COLS], int y, int x,
                             char *filename);
 local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
@@ -123,12 +163,16 @@ int main(void) {
   cbreak();             /* Take input chars one at a time, no wait for \n */
   noecho();             /* Turn off echoing */
 
+  if (curs_set(CURSOR_INVISIBLE) == ERR) {
+    log_add(log_warn, "Failed to hide cursor\n");
+  }
+
   // Capture mouse events
   if (!mousemask(BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED |
                      BUTTON1_DOUBLE_CLICKED | REPORT_MOUSE_POSITION,
                  NULL)) {
-    fprintf(stderr, "No mouse events can be captured (try a different terminal "
-                    "or try 'TERM=xterm-256color asciied')\n");
+    fprintf(stderr, "No mouse events can be captured. Try a different terminal "
+                    "or start with 'TERM=xterm-256color asciied')\n");
   }
   /// Note:
   /// Since I want both color support and mouse position reporting:
@@ -171,16 +215,7 @@ int main(void) {
 
   /* Initialize buffer and screen with spaces */
   draw_ui();
-  attrset(COLOR_PAIR(current_color_id));
-  foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
-    try(move(y, 0));
-    foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
-      buffer[y][x].ch = ' ';
-      buffer[y][x].color_id = current_color_id;
-      buffer[y][x].attrs = CE_NONE;
-      try(addch(' '));
-    }
-  }
+  clear_draw_area(buffer);
   /* endfold */
 
   /** startfold loop **/
@@ -206,7 +241,7 @@ int main(void) {
       if (ch >= 32 && ch < 127) {
 
         /* Change what char to print */
-        draw_ch = ch;
+        current_char = ch;
       }
       break;
 
@@ -227,10 +262,11 @@ int main(void) {
 
     /* New painting */
     case CTRL('n'):
+      notify("New painting? (y/n)");
       if (get_cmd_input() == ok &&
           (strcmp(cmdline_buf, "") != 0 || strcmp(cmdline_buf, "y") != 0 ||
            strcmp(cmdline_buf, "Y") != 0)) {
-        memset(buffer, ' ', sizeof(buffer));
+        fill_buffer(buffer, EMPTY_CENTRY);
         draw_ui();
         draw_buffer(buffer);
       }
@@ -243,20 +279,43 @@ int main(void) {
 
     /* Save and load file */
     case CTRL('s'):
-      if (get_cmd_input() == ok)
-        save_to_file(buffer, cmdline_buf);
+#ifdef TESTS
+      assert(SAVE_DIR_LEN == strlen(SAVE_DIR));
+#endif // TESTS
+      notify("Save as: ");
+      if (cmdline_buf[0] != '\0') {
+        char *filename_start = currently_open_file + SAVE_DIR_LEN - 1;
+        int filename_len = strlen(filename_start) - FILE_EXTENSION_LEN;
+        prefill_cmdline(filename_start, filename_len);
+      }
+      if (get_cmd_input() == ok) {
+        clear_notifications();
+        Result res = save_to_file(buffer, cmdline_buf);
+        if (res != ok) {
+          notify("Error saving file");
+          log_add(log_err, "Error saving file: %s\n", cmdline_buf);
+          die_gracefully(res);
+        }
+      } else {
+        clear_notifications();
+      }
       break;
     case CTRL('o'):
+      notify("Open file:");
       if (get_cmd_input() == ok) {
+        clear_notifications();
         Result res = load_from_file(buffer, y, x, cmdline_buf);
         if (res == file_not_found) {
           log_add(log_err, "File not found: %s\n", cmdline_buf);
+          notify("File not found");
           break;
         } else if (res != ok && res != no_input) {
           log_add(log_err, "Error loading file: %s\n", cmdline_buf);
           die_gracefully(res);
         }
         draw_buffer(buffer);
+      } else {
+        clear_notifications();
       }
       break;
 
@@ -275,17 +334,21 @@ int main(void) {
 
     /* Move with arrows */
     case KEY_LEFT:
+      curs_set(CURSOR_VISIBLE);
       if (x > 0)
         try(move(y, x - 1));
       break;
     case KEY_RIGHT:
+      curs_set(CURSOR_VISIBLE);
       try(move(y, x + 1));
       break;
     case KEY_UP:
+      curs_set(CURSOR_VISIBLE);
       if (y > 0)
         try(move(y - 1, x));
       break;
     case KEY_DOWN:
+      curs_set(CURSOR_VISIBLE);
       try(move(y + 1, x));
       break;
 
@@ -293,9 +356,11 @@ int main(void) {
     case KEY_ENTER:
     case CTRL('m'): /* '\r' */
     case '\n':
-      write_char(buffer, y, x, draw_ch, current_color_id, current_attrs);
+      curs_set(CURSOR_VISIBLE);
+      write_char(buffer, y, x, current_char, current_color_id, current_attrs);
       break;
     case '\b': /* '^h' */
+      curs_set(CURSOR_VISIBLE);
       write_char(buffer, y, x, ' ', 0, 0);
       break;
 
@@ -339,9 +404,10 @@ quit:
 local Result get_cmd_input() {
 
   /* Go to cmdline position */
-  int y_old, x_old;
-  getyx(stdscr, y_old, x_old);
-  try(mvaddch(LINES - 1, 0, '>'));
+  int y_old = getcury(stdscr);
+  int x_old = getcurx(stdscr);
+  try(attrset(CMD_LINE_ATTRS));
+  try(mvaddnstr(LINES - 1, 0, "> ", 2));
   refresh();
 
   /* Retrieve input */
@@ -358,7 +424,7 @@ local Result get_cmd_input() {
 
       /* Clear cmd line and go back to old position */
       cmdline_buf[0] = '\0';
-      clear_cmd_line();
+      clear_cmdline();
       try(move(y_old, x_old));
       refresh();
 
@@ -370,9 +436,9 @@ local Result get_cmd_input() {
     case CTRL('g'):
       if (i > 0) {
         cmdline_buf[i - 1] = '\0';
-        try(addstr("\b \b"));
-        refresh();
+        try(addnstr("\b \b", 3));
         i--;
+        refresh();
       }
       break;
 
@@ -392,17 +458,27 @@ local Result get_cmd_input() {
 
 quit:
   /* Clear cmd line again */
-  clear_cmd_line();
+  clear_cmdline();
   try(move(y_old, x_old));
   refresh();
   return ok;
 }
 /* endfold */
 
-/** startfold clear_cmd_line
+/** startfold prefill_cmdline
+ * Prefill command line with filename
+ */
+local fn prefill_cmdline(char *str, int n) {
+  strncpy(cmdline_buf, str, n);
+  try(attrset(CMD_LINE_ATTRS));
+  try(mvaddnstr(LINES - 1, 2, str, n));
+}
+/* endfold */
+
+/** startfold clear_cmdline
  * Clear command line.
  */
-local fn clear_cmd_line() {
+local fn clear_cmdline() {
   try(move(LINES - 1, 0));
   try(clrtoeol());
   try(attrset(UI_BG_ATTRS));
@@ -412,25 +488,27 @@ local fn clear_cmd_line() {
 /* endfold Command line input */
 
 /* startfold Status line */
-local fn notify(char *msg);
+local fn clear_notifications() { draw_status_line(); }
 
-// Length: excluding NULL terminator
-#define COLOR_INDICATOR_LENGTH 3
-#define COLOR_INDICATOR_RIGHT_OFFSET 0
-#define COLOR_INDICATOR_STRING "   "
+local fn notify(char *msg) {
+  int msg_len = strlen(msg);
+  try(move(NOTIFY_AREA_Y, NOTIFY_AREA_X));
+  try(attrset(NOTIFY_ATTRS));
+  try(addnstr(msg, msg_len));
+  try(addnstr(SPACES_100, NOTIFY_AREA_WIDTH - msg_len));
+  refresh();
+}
 
-// Length: excluding NULL terminator
-#define MODE_INDICATOR_LENGTH 7
 const char *mode_indicator() {
   switch (mode) {
   case mode_normal:
-    return "NORMAL ";
+    return "  NORMAL  ";
   case mode_select:
-    return "SELECT ";
+    return "  SELECT  ";
   case mode_preview:
-    return "PREVIEW";
+    return "  PREVIEW ";
   case mode_drag:
-    return " DRAG  ";
+    return "  DRAG    ";
   }
   log_add(log_err, "Unknown mode: %d\n", mode);
   return "ERR";
@@ -445,19 +523,20 @@ local fn draw_status_line() {
   try(clrtoeol());
 
   // Draw mode
-  move(LINES - 2, COLS / 2 - MODE_INDICATOR_LENGTH / 2 - 1);
-  attrset(COLOR_PAIR(DefaultCollection_WHITE));
+  move(LINES - 2, COLS / 2 - MODE_INDICATOR_LEN / 2 - 1);
+  attrset(UI_MODE_INDICATOR_ATTRS);
   const char *mode_str = mode_indicator();
-  try(addnstr(mode_str, MODE_INDICATOR_LENGTH));
+  try(addnstr(mode_str, MODE_INDICATOR_LEN));
 
   // Draw color indicator
-  move(LINES - 2, COLS - COLOR_INDICATOR_LENGTH - 1 - COLOR_INDICATOR_RIGHT_OFFSET);
+  move(LINES - 2,
+       COLS - COLOR_INDICATOR_LEN - 1 - COLOR_INDICATOR_RIGHT_OFFSET);
   attrset(COLOR_PAIR(current_color_id) | A_REVERSE);
-  try(addnstr(COLOR_INDICATOR_STRING, COLOR_INDICATOR_LENGTH));
+  try(addnstr(COLOR_INDICATOR_STRING, COLOR_INDICATOR_LEN));
 
 #ifdef TESTS
-  assert(strlen(COLOR_INDICATOR_STRING) == COLOR_INDICATOR_LENGTH);
-  assert(strlen(mode_str) == MODE_INDICATOR_LENGTH);
+  assert(strlen(COLOR_INDICATOR_STRING) >= COLOR_INDICATOR_LEN);
+  assert(strlen(mode_str) == MODE_INDICATOR_LEN);
 #endif // TESTS
 
   // Go back
@@ -490,6 +569,44 @@ local bool endswith(char *str, char *suffix) {
 
 /* startfold Window & Buffer */
 
+/** startfold clear_all
+ * Clear the buffer
+ * Set all entries in the buffer to EMPTY_CENTRY
+ * and clear the screen with the correct attributes.
+ *
+ * Functionally almost equivalent to `fill_buffer(buf, EMPTY_CENTRY);
+ * draw_buffer(buf);`, but faster (iterates only once) and only sets and draws.
+ */
+local fn clear_draw_area(struct CEntry buffer[LINES][COLS]) {
+  try(attrset(COLOR_PAIR(EMPTY_CENTRY.color_id) |
+              ce2curs_attrs(EMPTY_CENTRY.attrs)));
+  int draw_area_width = DRAW_AREA_WIDTH;
+  foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
+    // Draw 100 spaces at once
+    try(move(y, DRAW_AREA_MIN_X));
+    for (int drawn = 0; drawn < DRAW_AREA_WIDTH; drawn += 100) {
+      try(addnstr(SPACES_100, draw_area_width - drawn));
+    }
+    foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
+      buffer[y][x] = EMPTY_CENTRY;
+    }
+  }
+}
+/* endfold */
+
+/** startfold fill_buffer
+ * Fill the buffer with `fill_centry`
+ */
+local fn fill_buffer(struct CEntry buffer[LINES][COLS],
+                     struct CEntry fill_centry) {
+  foreach (y, 0, LINES) {
+    foreach (x, 0, COLS) {
+      buffer[y][x] = fill_centry;
+    }
+  }
+}
+/* endfold */
+
 /** startfold draw_ui
  * Draw all elements, that are not part of the image
  */
@@ -510,7 +627,7 @@ local fn draw_ui() {
   // TODO: draw quick palette
   // Draw status line
   draw_status_line();
-  clear_cmd_line();
+  clear_cmdline();
 }
 /* endfold */
 
@@ -519,9 +636,10 @@ local fn draw_ui() {
  */
 local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
   draw_ui();
-  foreach (y, 1, LINES) {
+  move(DRAW_AREA_MIN_Y, DRAW_AREA_MIN_X);
+  foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
     move(y, 0);
-    foreach (x, 0, COLS) {
+    foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
       struct CEntry *e = &buffer[y][x];
 
       /* Convert attrs */
@@ -541,43 +659,50 @@ local fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
  * attributes [debug function]
  */
 local fn dump_buffer_readable(struct CEntry buffer[LINES][COLS], FILE *file) {
-  fprintf(file, "<--- Buffer dump --->\nCE%d,%d\n", LINES, COLS);
+  fprintf(file, "<--- Char dump --->\nCE%d,%d\n", LINES, COLS);
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
       fprintf(file, "%c", buffer[y][x].ch);
     }
     fprintf(file, "\n");
   }
-  fprintf(file, "<--- End dump --->\n");
+  fprintf(file, "<--- End char dump --->\n");
   fprintf(file, "<--- Attrs and color --->\nCE%d,%d\n", LINES, COLS);
   foreach (y, 0, LINES) {
     foreach (x, 0, COLS) {
-      fprintf(file, "|%d%d", buffer[y][x].attrs, buffer[y][x].color_id);
+      fprintf(file, "|%c %2d %d", buffer[y][x].ch, buffer[y][x].color_id,
+              buffer[y][x].attrs);
     }
     fprintf(file, "\n");
   }
-  fprintf(file, "<--- End dump --->\n");
+  fprintf(file, "<--- End full dump --->\n");
 }
 /* endfold */
 
 /** startfold save_to_file
  * Write the buffer to the file
  */
-local fn save_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
+local Result save_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 
   /* Open the file */
-  char file[128];
-  if (strlen(filename) > 128) {
-    return;
+  if (strlen(filename) > 64) {
+    log_add(log_err, "Filename too long: %s\n", filename);
+    return alloc_fail;
   }
-  if (endswith(filename, ".centry")) {
-    sprintf(file, "saves/%s", filename);
-  } else {
-    sprintf(file, "saves/%s.centry", filename);
+
+  /* Build filename */
+  if (strncmp(currently_open_file, "saves/", 6) != 0) {
+    strncpy(currently_open_file, "saves/", 7);
   }
-  FILE *fp = fopen(file, "wb");
+  strcat(currently_open_file, filename);
+  if (!endswith(currently_open_file, ".centry")) {
+    strcat(currently_open_file, ".centry");
+  }
+
+  FILE *fp = fopen(currently_open_file, "wb");
   if (fp == NULL) {
-    return;
+    log_add(log_err, "Could not open file: %s\n", currently_open_file);
+    return file_not_found;
   }
 
   /* Write the header */
@@ -587,17 +712,8 @@ local fn save_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 
   fwrite(buffer, sizeof(struct CEntry), LINES * COLS, fp);
 
-  /*   /1* Write the buffer *1/ */
-  /*   foreach (y, 0, LINES) { */
-  /*     foreach (x, 0, COLS) { */
-  /*       struct CEntry *e = &buffer[y][x]; */
-  /*       fputc(e->ch, fp); */
-  /*       u8 attrs = e->color_id | (e->attrs << 5); */
-  /*       fputc(attrs, fp); */
-  /*     } */
-  /*   } */
-
   fclose(fp);
+  return ok;
 }
 /* endfold */
 
@@ -607,29 +723,27 @@ local fn save_to_file(struct CEntry buffer[LINES][COLS], char *filename) {
 local Result load_from_file(struct CEntry buffer[LINES][COLS], int insert_pos_y,
                             int insert_pos_x, char *filename) {
 
-  /* Open the file */
-  static char file[128];
-
   /* Check length of filename */
-  if (strlen(filename) > 128) {
+  if (strlen(filename) > 64) {
+    log_add(log_err, "Filename too long: %s\n", filename);
     return alloc_fail;
   }
 
   /* Add extension if necessary */
   if (endswith(filename, ".centry")) {
-    sprintf(file, "saves/%s", filename);
+    sprintf(currently_open_file, "saves/%s", filename);
   } else {
-    sprintf(file, "saves/%s.centry", filename);
+    sprintf(currently_open_file, "saves/%s.centry", filename);
   }
 
   if (loglvl >= log_info) {
-    log_add(log_info, "Loading file %s\n", file);
+    log_add(log_info, "Loading file %s\n", currently_open_file);
   }
 
   /* Open the file */
-  FILE *fp = fopen(file, "rb");
+  FILE *fp = fopen(currently_open_file, "rb");
   if (fp == NULL) {
-    log_add(log_warn, "Couldn't open file: %s\n", file);
+    log_add(log_warn, "Could not open file: %s\n", currently_open_file);
     return file_not_found;
   }
 
@@ -650,31 +764,22 @@ local Result load_from_file(struct CEntry buffer[LINES][COLS], int insert_pos_y,
 
   /* Check if the file is too big */
   if (insert_lines > LINES || insert_cols > COLS) {
-    log_add(log_warn, "File too big: %s\n", file);
+    log_add(log_warn,
+            "File %s cannot be loaded (dimensions of saved buffer: %d x %d, "
+            "terminal: %d x %d)\n",
+            currently_open_file, insert_lines, insert_cols, LINES, COLS);
     fclose(fp);
     return alloc_fail;
   }
 
+  log_add(log_info, "Loading %dx%d bytes from %s\n", insert_lines, insert_cols,
+          currently_open_file);
+
   /* Insert at mouse position, or move away if not enough space */
   insert_pos_y = min(insert_lines + insert_pos_y, LINES - insert_lines);
-  insert_cols = min(insert_cols + insert_pos_x, COLS - insert_cols);
+  insert_pos_x = min(insert_cols + insert_pos_x, COLS - insert_cols);
 
-  /* Read to clip buffer */
-  foreach (y, insert_pos_y, insert_pos_y + insert_lines) {
-    foreach (x, insert_pos_x, insert_pos_x + insert_cols) {
-
-      /* Read two bytes and change the corresponding entry in `clip_buf` */
-      struct CEntry *e = &buffer[y][x];
-
-      /* Char */
-      e->ch = (u8)fgetc(fp);
-
-      /* Flags */
-      u8 flags = (u8)fgetc(fp);
-      e->color_id = ce_read_color_id(flags); /**< @todo: single instruction */
-      e->attrs = ce_read_attrs(flags);
-    }
-  }
+  fread(buffer, sizeof(struct CEntry), insert_lines * insert_cols, fp);
 
   /* insert_partial_buffer(buffer, clip_buf, y, x, insert_lines, insert_cols);
    */
@@ -792,9 +897,12 @@ local fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
  */
 local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
                         struct CEntry clip_buf[LINES][COLS]) {
-  if (mevent.bstate &
-      (BUTTON1_DOUBLE_CLICKED | BUTTON1_CLICKED | BUTTON1_PRESSED)) {
 
+  if (mevent.bstate & BUTTON1_DOUBLE_CLICKED) {
+    write_char(buffer, mevent.y, mevent.x, current_char, current_color_id,
+               current_attrs);
+  }
+  if (mevent.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED)) {
     /* Mouse click */
     if (mevent.y == 0) {
       /* Color selection */
@@ -826,6 +934,9 @@ local fn react_to_mouse(struct CEntry buffer[LINES][COLS],
     log_add(log_err, "Illegal mouse state: %d\n", mevent.bstate);
     die_gracefully(illegal_state);
   }
+  if (!(mevent.bstate & REPORT_MOUSE_POSITION)) {
+    curs_set(CURSOR_INVISIBLE);
+  }
 }
 /* endfold */
 
@@ -840,7 +951,7 @@ local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
   /* Update dragging */
   if (mode == mode_normal) {
     /* Draw at the mouse position */
-    write_char(buffer, mevent.y, mevent.x, draw_ch, current_color_id,
+    write_char(buffer, mevent.y, mevent.x, current_char, current_color_id,
                current_attrs);
   } else if (mode == mode_select) {
     mevent.y = clamp(mevent.y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
@@ -877,6 +988,7 @@ local fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
  * @param sig The signal that caused the exit
  */
 local fn die_gracefully(int sig) {
+  attrset(A_NORMAL);
   endwin();
   log_add(log_err, "Exiting with signal %d\n", sig);
   exit(sig);

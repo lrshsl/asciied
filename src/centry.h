@@ -3,6 +3,7 @@
 
 #include "header.h"
 #include "cursed.h"
+#include "constants.h"
 #include <assert.h>
 #include <ncurses.h>
 

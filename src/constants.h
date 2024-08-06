@@ -42,6 +42,8 @@ enum DefaultCollection {
 };
 /* clang-format on */
 
+#define DEFAULT_COLOR_ID DefaultCollection_WHITE
+
 #endif
 
 // vim: foldmethod=marker foldmarker=startfold,endfold

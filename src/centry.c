@@ -1,7 +1,11 @@
 #include "centry.h"
 
 
-const struct CEntry EMPTY_CENTRY = { 0, 0, 0 };
+const struct CEntry EMPTY_CENTRY = {
+  .ch = ' ',
+  .color_id = DEFAULT_COLOR_ID,
+  .attrs = CE_NONE
+};
 
 /* Curses attrs --> CEntry attrs */
 attr_t ce2curs_attrs(u8 attr) {
