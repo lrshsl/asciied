@@ -10,24 +10,24 @@ specific task.
 
 ### Normal mode key reference
 
-||    Group     |     Key     |     Action     |              Explanation              ||
-|| ------------ | ----------- | -------------- | ------------------------------------- ||
-|| File /       | `<ctrl-q>`  | Quit           | Quit the app                          ||
-|| Buffer       | `<ctrl-s>`  | Save           | Save buffer (or selection) to a file  ||
-||              | `<ctrl-o>`  | Open           | Load from a file                      ||
-||              | `<cltr-n>`  | Copy           | Copy selection                        ||
-||              | `<ctrl-r>`  | Reload         | Redraw the current buffer             ||
-||              | `<space>x`  | Draw with x    | Select char x for drawing             ||
-|| Draw         | `[0-9]`     | Use color      | Select a color from the quick palette ||
-|| Character    | `c[0-9]`    | Save color     | Save current color to quick palette   ||
-||              | `i`         | Italics        | Toggle italics                        ||
-||              | `b`         | Save color     | Toggle bold                           ||
-||              | `<ctrl-i>`  | Invert         | Invert fore and background color      ||
-|| Mode         | `s`         | Select         | Enter selection mode                  ||
-||              | `p`         | Paste          | Enter paste preview mode              ||
-|| Single       | `<arrows>`  | Move cursor    | Navigate the cursor                   ||
-|| Char         | `<CR>`      | Draw at cursor | Draw a single char under the cursor   ||
-|| (No mouse)   | `<BS>`      | Delete char    | Delete / erase under the cursor       ||
+|    Group     |     Key     |     Action     |              Explanation              |
+| ------------ | ----------- | -------------- | ------------------------------------- |
+| File /       | `<ctrl-q>`  | Quit           | Quit the app                          |
+| Buffer       | `<ctrl-s>`  | Save           | Save buffer (or selection) to a file  |
+|              | `<ctrl-o>`  | Open           | Load from a file                      |
+|              | `<cltr-n>`  | Copy           | Copy selection                        |
+|              | `<ctrl-r>`  | Reload         | Redraw the current buffer             |
+|              | `<space>x`  | Draw with x    | Select char x for drawing             |
+| Draw         | `[0-9]`     | Use color      | Select a color from the quick palette |
+| Character    | `c[0-9]`    | Save color     | Save current color to quick palette   |
+|              | `i`         | Italics        | Toggle italics                        |
+|              | `b`         | Save color     | Toggle bold                           |
+|              | `<ctrl-i>`  | Invert         | Invert fore and background color      |
+| Mode         | `s`         | Select         | Enter selection mode                  |
+|              | `p`         | Paste          | Enter paste preview mode              |
+| Single       | `<arrows>`  | Move cursor    | Navigate the cursor                   |
+| Char         | `<CR>`      | Draw at cursor | Draw a single char under the cursor   |
+| (No mouse)   | `<BS>`      | Delete char    | Delete / erase under the cursor       |
 
 For colors, see [quick palette](docs/colors.md#quick-palette).
 
