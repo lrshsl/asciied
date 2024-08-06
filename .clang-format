@@ -1,7 +1,7 @@
 BasedOnStyle: LLVM
 
-IndentWidth: 8
-TabWidth:    3
+IndentWidth: 4
+TabWidth:    4
 UseTab: AlignWithSpaces
 
 InsertBraces:    true
