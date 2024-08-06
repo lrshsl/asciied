@@ -1,1 +1,45 @@
 BasedOnStyle: LLVM
+
+IndentWidth: 8
+TabWidth:    3
+UseTab: AlignWithSpaces
+
+InsertBraces:    true
+InsertNewlineAtEOF: true
+
+AlignAfterOpenBracket: Align # BlockIndent
+AlignArrayOfStructures: Left
+ColumnLimit:     80
+
+DerivePointerAlignment: false
+PointerAlignment: Right
+
+ForEachMacros:
+  - foreach
+
+MaxEmptyLinesToKeep: 2
+SeparateDefinitionBlocks: Always
+KeepEmptyLinesAtTheStartOfBlocks: true
+LineEnding: LF
+
+ReflowComments:  true
+
+SpaceAfterCStyleCast: false
+SpaceAroundPointerQualifiers: Both
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyBlock: true
+
+SpacesInParens:  Custom
+SpacesInParensOptions:
+  InCStyleCasts:   false
+  InConditionalStatements: true  # Spaces in while, if, etc
+  InEmptyParentheses: false
+  Other:           false
+
+StatementAttributeLikeMacros: [local, fn]
+
+Standard:        Latest
+WhitespaceSensitiveMacros:
+  - BOOST_PP_STRINGIZE
+  - STRINGIZE
+
