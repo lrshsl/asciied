@@ -5,3 +5,8 @@ build/
 # Separately managed
 docs/generated/
 
+log/
+
+saves/
+!saves/examples/*.centry
+
