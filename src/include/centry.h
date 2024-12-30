@@ -1,18 +1,18 @@
-#ifndef CENTRY_H
-#define CENTRY_H
+#ifndef CE_CENTRY_H
+#define CE_CENTRY_H
 
-#include "header.h"
 #include "cursed.h"
-#include "constants.h"
+#include "header.h"
+
 #include <assert.h>
 #include <ncurses.h>
 
 /*** Char Entry Types and helpers ***/
 enum CE_Attrs {
-  CE_NONE = 0,
-  CE_REVERSE = 1,
-  CE_BOLD = 2,
-  CE_ITALIC = 4,
+	CE_NONE = 0,
+	CE_REVERSE = 1,
+	CE_BOLD = 2,
+	CE_ITALIC = 4,
 };
 
 /* CEntry struct {{{
@@ -27,8 +27,8 @@ enum CE_Attrs {
  * them)
  * }}} */
 struct CEntry {
-  char ch;
-  u8 color_id : 5, attrs : 3;
+	char ch;
+	u8 color_id : 5, attrs : 3;
 };
 
 extern const struct CEntry EMPTY_CENTRY;
@@ -63,37 +63,31 @@ struct CEntry curs2ce_all(chtype ch);
 /* Curses chtype <-- CEntry */
 chtype ce2curs_all(struct CEntry ce);
 
-
 /*** Editor ***/
 enum Mode {
-  mode_normal,  /**< (Normal | Draw) mode */
-  mode_select,  /**< Select area in image (unstable) */
-  mode_drag,    /**< Drag a selection (unimplemented) */
-  mode_preview, /**< (Paste | file load) preview (unimplemented) */
+	mode_normal,  /**< (Normal | Draw) mode */
+	mode_select,  /**< Select area in image (unstable) */
+	mode_drag,    /**< Drag a selection (unimplemented) */
+	mode_preview, /**< (Paste | file load) preview (unimplemented) */
 };
 
 /* Error codes. Will be extended further and order might change */
 typedef enum Err {
 
-  /* Success */
-  ok,
+	/* Success */
+	ok,
 
-  /* Can usually be recovered */
-  no_input,
+	/* Can usually be recovered */
+	no_input,
 
-  /* Maybe recoverable */
-  file_not_found, /* fopen failed */
+	/* Maybe recoverable */
+	file_not_found, /* fopen failed */
 
-  /* Can't be recovered */
-  any_err,
-  alloc_fail,            /* Couldn't allocate enough memory */
-  didnt_try_hard_enough, /* When `try` fails */
-  illegal_state,         /* Assertion failed */
+	/* Can't be recovered */
+	any_err,
+	alloc_fail,            /* Couldn't allocate enough memory */
+	didnt_try_hard_enough, /* When `try` fails */
+	illegal_state,         /* Assertion failed */
 } Result;
-
-/* Coordinate pair */
-struct Cords {
-  int x, y;
-};
 
 #endif

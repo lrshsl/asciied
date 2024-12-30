@@ -11,9 +11,10 @@ releasebin = $(builddir)/$(name)_release
 
 # How to build
 cc = gcc
-dbgflags = -g -lcurses -Wall -Wextra --std=c99 #-fsanitize=address
+cflags = -Iinclude -lcurses -funsigned-char -funsigned-bitfields
+dbgflags = -g -ggdb -Wall -Wextra --std=c99 #-fsanitize=address
 valgrindflags = --leak-check=full --suppressions=ncurses.supp
-relflags = -O2 -lcurses -s
+relflags = -O3 -s
 
 # Don't touch
 csrc = $(wildcard $(srcdir)/**.c)
@@ -39,11 +40,11 @@ run: $(debugbin)
 # How to build the executables
 $(debugbin): $(csrc)
 	@mkdir -p $(builddir)
-	$(cc) -o $@ $(dbgflags) $^
+	$(cc) -o $@ $(cflags) $(dbgflags) $^
 
 $(releasebin): $(csrc)
 	@mkdir -p $(builddir)
-	$(cc) -o $@ $(relflags) $^
+	$(cc) -o $@ $(cflags) $(relflags) $^
 
 # Check with valgrind for memory leaks
 # > Note: ncurses.supp is used in order to suppress some
@@ -68,6 +69,9 @@ clean:
 
 # Clean everything
 cleanall:
-	rm -fr $(builddir)/ || true
-	rm -fr log/** || true
-	rm -fr $(docdir) || true
+	rm -rf            \
+		$(builddir)/   \
+		log/**         \
+		$(docdir)      \
+	|| true
+

@@ -1,5 +1,5 @@
-#ifndef LOG_H
-#define LOG_H
+#ifndef CE_LOG_H
+#define CE_LOG_H
 
 #include "header.h"
 
@@ -8,16 +8,18 @@
  * Will be extended further and order might change
  */
 enum LogLevel {
-  log_none,
+	LOG_NONE,
 
-  log_err,
-  log_warn,
-  log_info,
-  log_debug,
-  log_trace,
+	LOG_ERR,
+	LOG_WARN,
+	LOG_INFO,
+	LOG_DEBUG,
+	LOG_TRACE,
 
-  log_all,
+	LOG_ALL,
 };
+
+extern enum LogLevel loglvl;
 
 /**
  * Log a message with a given log level.
@@ -29,7 +31,5 @@ enum LogLevel {
  * @todo Use preprocessor, add file and line number
  */
 fn log_add(enum LogLevel lvl, char *fmt, ...);
-
-static enum LogLevel loglvl = log_all;
 
 #endif

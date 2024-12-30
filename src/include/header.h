@@ -1,5 +1,5 @@
-#ifndef HEADER_H
-#define HEADER_H
+#ifndef CE_HEADER_H
+#define CE_HEADER_H
 
 #include <stdint.h>
 
@@ -23,25 +23,31 @@
 #define KEY_ESC 27
 #define CTRL(x) ((x) & 0x1f)
 
+#define SPACES_100                                                             \
+	"                                                  "                       \
+	"                                                  "
+
 /* Try an operation and panic (safely) if operation fails */
 #define try(stmt)                                                              \
-  if ((stmt) == ERR) {                                                         \
-    log_add(log_err, "Try failed in %s on line %d\n", __FILE__, __LINE__);     \
-    die_gracefully(didnt_try_hard_enough);                                     \
-  };
+	if ( (stmt) == ERR ) {                                                     \
+		log_add(LOG_ERR, "Try failed in %s on line %d\n", __FILE__, __LINE__); \
+		die_gracefully(didnt_try_hard_enough);                                 \
+	};
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #define max(a, b) ((a) > (b) ? (a) : (b))
 
 local inline int clamp(int x, int min, int max) {
-  if (x < min)
-    return min;
-  if (x > max)
-    return max;
-  return x;
+	if ( x < min ) {
+		return min;
+	}
+	if ( x > max ) {
+		return max;
+	}
+	return x;
 }
 
-#define loop for (;;)
+#define loop for ( ;; )
 
 /* foreach macro
  *
@@ -55,7 +61,7 @@ local inline int clamp(int x, int min, int max) {
  * foreach(x, 0, 10) {}
  *
  */
-#define foreach(x, min, max) for (int(x) = (min); ((x) < (max)); (++(x)))
+#define foreach(x, min, max) for ( int(x) = (min); ((x) < (max)); (++(x)) )
 
 #endif
-/* vim: fdm=marker fmr=startfold,endfold */
+// vim: fdm=marker fmr=startfold,endfold

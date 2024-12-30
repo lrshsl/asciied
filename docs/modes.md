@@ -25,12 +25,16 @@ specific task.
 |              | `<ctrl-i>`  | Invert         | Invert fore and background color      |
 | Mode         | `s`         | Select         | Enter selection mode                  |
 |              | `p`         | Paste          | Enter paste preview mode              |
+|              | `r`         | Rect draw      | Enter rectangle draw mode             |
 | Single       | `<arrows>`  | Move cursor    | Navigate the cursor                   |
 | Char         | `<CR>`      | Draw at cursor | Draw a single char under the cursor   |
 | (No mouse)   | `<BS>`      | Delete char    | Delete / erase under the cursor       |
 
 For colors, see [quick palette](docs/colors.md#quick-palette).
 
+## Rectangle mode
+
+Draw rectangles (and thus also horizontal and vertical lines).
 
 ## Selection mode
 
