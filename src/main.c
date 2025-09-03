@@ -48,8 +48,6 @@
  * - [ ] Blink support
  *
  * Known Issues:
- * - not always moving back after drawing ui (TODO: make stash_pos() and
- * pop_pos())
  * - unknown curses attributes are spammed into logfile
  */
 
@@ -426,14 +424,13 @@ fn prefill_cmdline(char *str, int n) {
  * Clear command line.
  */
 fn clear_cmdline() {
-	int old_y = getcury(stdscr);
-	int old_x = getcurx(stdscr);
+	stash_pos();
 
 	try(move(LINES - 1, 0));
 	try(clrtoeol());
 	try(attrset(UI_BG_ATTRS));
 
-	move(old_y, old_x);
+	restore_pos();
 }
 
 /* endfold */
@@ -444,8 +441,7 @@ fn clear_cmdline() {
 fn clear_notifications() { draw_status_line(); }
 
 fn notify(char *msg) {
-	int old_y = getcury(stdscr);
-	int old_x = getcurx(stdscr);
+	stash_pos();
 
 	int msg_len = strlen(msg);
 	try(move(NOTIFY_AREA_Y, NOTIFY_AREA_X));
@@ -454,7 +450,7 @@ fn notify(char *msg) {
 	try(addnstr(SPACES_100, NOTIFY_AREA_WIDTH - msg_len));
 	refresh();
 
-	move(old_y, old_x);
+	restore_pos();
 }
 
 const char *mode_indicator() {
@@ -473,8 +469,7 @@ const char *mode_indicator() {
 }
 
 fn draw_status_line() {
-	int old_y = getcury(stdscr);
-	int old_x = getcurx(stdscr);
+	stash_pos();
 
 	move(LINES - 2, 0);
 	attrset(UI_BG_ATTRS);
@@ -497,8 +492,7 @@ fn draw_status_line() {
 	assert(strlen(mode_str) == MODE_INDICATOR_LEN);
 #endif // TESTS
 
-	// Go back
-	move(old_y, old_x);
+	restore_pos();
 }
 
 fn set_color(u8 color_id) {
@@ -539,8 +533,7 @@ bool endswith(char *str, char *suffix) {
  * draw_buffer(buf);`, but faster (iterates only once) and only sets and draws.
  */
 fn clear_draw_area(struct CEntry buffer[LINES][COLS]) {
-	int old_y = getcury(stdscr);
-	int old_x = getcurx(stdscr);
+	stash_pos();
 	try(attrset(COLOR_PAIR(EMPTY_CENTRY.color_id) |
 	            ce2curs_attrs(EMPTY_CENTRY.attrs)));
 	int draw_area_width = DRAW_AREA_WIDTH;
@@ -554,7 +547,7 @@ fn clear_draw_area(struct CEntry buffer[LINES][COLS]) {
 			buffer[y][x] = EMPTY_CENTRY;
 		}
 	}
-	try(move(old_y, old_x));
+	restore_pos();
 }
 
 /* endfold */
