@@ -1,5 +1,6 @@
 #include "include/centry.h"
 #include "include/colors.h"
+#include "include/vec.h"
 
 
 const struct CEntry EMPTY_CENTRY = {

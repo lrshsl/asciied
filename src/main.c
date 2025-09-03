@@ -1,6 +1,7 @@
 #include "include/main.h"
 #include "include/centry.h"
 #include "include/config.h"
+#include "include/cursed.h"
 #include "include/header.h"
 #include "include/log.h"
 
@@ -47,7 +48,6 @@
  * - [ ] Blink support
  *
  * Known Issues:
- * - prefill_cmdline --> cursor not at end
  * - not always moving back after drawing ui (TODO: make stash_pos() and
  * pop_pos())
  * - unknown curses attributes are spammed into logfile
@@ -70,12 +70,6 @@ local char currently_open_file[128] = {0};
 local struct Vec2 drag_start = {-1, -1};
 local struct Vec2 drag_end;
 local bool is_dragging = false;
-
-/* endfold */
-
-/** startfold Prototypes
- * Forward declarations
- */
 
 /* endfold */
 
@@ -200,9 +194,11 @@ int main(void) {
 			/* New painting */
 		case CTRL('n'):
 			notify("New painting? (y/n)");
-			if ( get_cmd_input() == ok && (strcmp(cmdline_buf, "") != 0 ||
-			                               strcmp(cmdline_buf, "y") != 0 ||
-			                               strcmp(cmdline_buf, "Y") != 0) ) {
+			cmdline_prepare();
+			if ( cmdline_read_input() == ok &&
+			     (strcmp(cmdline_buf, "") != 0 ||
+			      strcmp(cmdline_buf, "y") != 0 ||
+			      strcmp(cmdline_buf, "Y") != 0) ) {
 				fill_buffer(buffer, EMPTY_CENTRY);
 				draw_ui();
 				draw_buffer(buffer);
@@ -220,12 +216,13 @@ int main(void) {
 			assert(SAVE_DIR_LEN == strlen(SAVE_DIR));
 #endif // TESTS
 			notify("Save as: ");
+			cmdline_prepare();
 			if ( cmdline_buf[0] != '\0' ) {
 				char *filename_start = currently_open_file + SAVE_DIR_LEN - 1;
 				int filename_len = strlen(filename_start) - FILE_EXTENSION_LEN;
 				prefill_cmdline(filename_start, filename_len);
 			}
-			if ( get_cmd_input() == ok ) {
+			if ( cmdline_read_input() == ok ) {
 				clear_notifications();
 				Result res = save_to_file(buffer, cmdline_buf);
 				if ( res != ok ) {
@@ -239,7 +236,8 @@ int main(void) {
 			break;
 		case CTRL('o'):
 			notify("Open file:");
-			if ( get_cmd_input() == ok ) {
+			cmdline_prepare();
+			if ( cmdline_read_input() == ok ) {
 				clear_notifications();
 				Result res = load_from_file(buffer, y, x, cmdline_buf);
 				if ( res == file_not_found ) {
@@ -336,19 +334,26 @@ quit:
 /* endfold Main */
 
 /* startfold Command line input */
+local struct Vec2 cmdline_old_pos;
+
+/** startfold prepare_cmdline_input
+ *
+ */
+fn cmdline_prepare() {
+	/* Go to cmdline position */
+	cmdline_old_pos = get_pos();
+	try(attrset(CMD_LINE_ATTRS));
+	try(mvaddnstr(LINES - 1, 0, "> ", 2));
+	refresh();
+}
+
+/* endfold prepare_cmdline_input */
 
 /** startfold get_cmd_input
  * Get input from user via cmd line. User input is written to `cmdline_buf`.
  * Returns `ok` on success, `any_err` on error or interrupt
  */
-Result get_cmd_input() {
-
-	/* Go to cmdline position */
-	int y_old = getcury(stdscr);
-	int x_old = getcurx(stdscr);
-	try(attrset(CMD_LINE_ATTRS));
-	try(mvaddnstr(LINES - 1, 0, "> ", 2));
-	refresh();
+Result cmdline_read_input() {
 
 	/* Retrieve input */
 	int i = 0;
@@ -365,7 +370,7 @@ Result get_cmd_input() {
 			/* Clear cmd line and go back to old position */
 			cmdline_buf[0] = '\0';
 			clear_cmdline();
-			try(move(y_old, x_old));
+			try(move(cmdline_old_pos.y, cmdline_old_pos.x));
 			refresh();
 
 			/* Return error: `cmdline_buf` shouldn't be used */
@@ -399,7 +404,7 @@ Result get_cmd_input() {
 quit:
 	/* Clear cmd line again */
 	clear_cmdline();
-	try(move(y_old, x_old));
+	try(move(cmdline_old_pos.y, cmdline_old_pos.x));
 	refresh();
 	return ok;
 }
@@ -410,14 +415,9 @@ quit:
  * Prefill command line with filename
  */
 fn prefill_cmdline(char *str, int n) {
-	int old_y = getcury(stdscr);
-	int old_x = getcurx(stdscr);
-
 	strncpy(cmdline_buf, str, n);
 	try(attrset(CMD_LINE_ATTRS));
 	try(mvaddnstr(LINES - 1, 2, str, n));
-
-	move(old_y, old_x);
 }
 
 /* endfold */

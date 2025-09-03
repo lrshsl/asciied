@@ -13,7 +13,8 @@ fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
                       struct CEntry clip_buf[LINES][COLS]);
 
 // Command line
-Result get_cmd_input();
+fn cmdline_prepare();
+Result cmdline_read_input();
 fn clear_cmdline();
 fn prefill_cmdline(char *str, int n);
 

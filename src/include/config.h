@@ -9,6 +9,8 @@
 #define LOG_FILE_NAME "log/logfile"
 #define BUFFER_DUMP_FILE "log/buffer_dump"
 
+#define POSITION_STACK_LENGTH (5)
+
 /* Do tests */
 #define TESTS
 

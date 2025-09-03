@@ -7,5 +7,6 @@
 
 void stash_pos();
 struct Vec2 pop_pos();
+struct Vec2 get_pos();
 
 #endif
