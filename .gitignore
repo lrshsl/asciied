@@ -10,3 +10,4 @@ log/
 saves/
 !saves/examples/*.centry
 
+.cache/
