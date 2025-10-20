@@ -3,6 +3,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 enum LogLevel loglvl = LOG_ALL;
 
@@ -22,6 +23,9 @@ fn log_add(enum LogLevel lvl, char *fmt, ...) {
 	char *prefix = "";
 	switch ( lvl ) {
 	case LOG_NONE:
+		break;
+	case LOG_FATAL:
+		prefix = "FATAL: ";
 		break;
 	case LOG_ERR:
 		prefix = "ERR  : ";
@@ -50,4 +54,11 @@ fn log_add(enum LogLevel lvl, char *fmt, ...) {
 	vfprintf(logfile, fmt, args);
 	va_end(args);
 	fclose(logfile);
+}
+
+fn die_gracefully(int sig) {
+	attrset(A_NORMAL);
+	endwin();
+	log_add(LOG_ERR, "Exiting with signal %d\n", sig);
+	exit(sig);
 }

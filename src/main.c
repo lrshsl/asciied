@@ -5,7 +5,6 @@
 #include "include/header.h"
 #include "include/log.h"
 
-#include <assert.h>
 #include <ncurses.h>
 #include <signal.h>
 #include <stdio.h>
@@ -19,6 +18,7 @@
  *    - cursed: thin wrapper around ncurses (try and stuff integrated?)
  *    - log: logging and errors
  *    - cmdline: command line input
+ *    - notify: notifications / messages right over the cmdline
  *  - Add tests
  *
  * FEATURES:
@@ -72,13 +72,18 @@ local bool is_dragging = false;
 /* endfold */
 
 /* startfold Main */
+#ifndef IS_TEST_BUILD
+#define IS_TEST_BUILD 0
+#endif
+
+#if !IS_TEST_BUILD
 
 /** startfold init
  * Main function
  */
 int main(void) {
 	/** Setup **/
-	log_add(LOG_NONE, "\n");
+	log_add(LOG_NONE, "");
 	log_add(LOG_INFO, "Starting...\n");
 
 	signal(SIGINT, swallow_interrupt); /* Set up an interrupt handler */
@@ -137,8 +142,8 @@ int main(void) {
 
 	/* Initialization */
 	int x, y;
-	struct CEntry buffer[LINES][COLS]; // TODO: strip size to DRAWABLE_AREA
-	struct CEntry clip_buf[LINES][COLS];
+	struct CEntry buffer[LINES][COLS];   // TODO: strip size to DRAWABLE_AREA
+	struct CEntry clip_buf[LINES][COLS]; // copied areas are copied here
 	int clip_x = 0;
 	int clip_y = 0;
 
@@ -199,20 +204,18 @@ int main(void) {
 			      strcmp(cmdline_buf, "Y") != 0) ) {
 				fill_buffer(buffer, EMPTY_CENTRY);
 				draw_ui();
-				draw_buffer(buffer);
+				draw_buffer(buffer, clip_buf);
 			}
 			break;
 
 			/* Reload */
 		case CTRL('r'):
-			draw_buffer(buffer);
+			draw_buffer(buffer, clip_buf);
 			break;
 
 			/* Save and load file */
 		case CTRL('s'):
-#ifdef TESTS
-			assert(SAVE_DIR_LEN == strlen(SAVE_DIR));
-#endif // TESTS
+			assert(SAVE_DIR_LEN == strlen(SAVE_DIR), "");
 			notify("Save as: ");
 			cmdline_prepare();
 			if ( cmdline_buf[0] != '\0' ) {
@@ -246,7 +249,7 @@ int main(void) {
 					log_add(LOG_ERR, "Error loading file: %s\n", cmdline_buf);
 					die_gracefully(res);
 				}
-				draw_buffer(buffer);
+				draw_buffer(buffer, clip_buf);
 			} else {
 				clear_notifications();
 			}
@@ -329,6 +332,7 @@ quit:
 
 /* endfold */
 
+#endif // IS_TEST_BUILD
 /* endfold Main */
 
 /* startfold Command line input */
@@ -487,10 +491,8 @@ fn draw_status_line() {
 	attrset(COLOR_PAIR(current_color_id) | A_REVERSE);
 	try(addnstr(COLOR_INDICATOR_STRING, COLOR_INDICATOR_LEN));
 
-#ifdef TESTS
-	assert(strlen(COLOR_INDICATOR_STRING) >= COLOR_INDICATOR_LEN);
-	assert(strlen(mode_str) == MODE_INDICATOR_LEN);
-#endif // TESTS
+	assert(strlen(COLOR_INDICATOR_STRING) >= COLOR_INDICATOR_LEN, "");
+	assert(strlen(mode_str) == MODE_INDICATOR_LEN, "");
 
 	restore_pos();
 }
@@ -533,15 +535,17 @@ bool endswith(char *str, char *suffix) {
  * draw_buffer(buf);`, but faster (iterates only once) and only sets and draws.
  */
 fn clear_draw_area(struct CEntry buffer[LINES][COLS]) {
+	assert(DRAW_AREA_MAX_X + 1 < COLS && DRAW_AREA_MIN_X >= 0, "");
+	assert(DRAW_AREA_MAX_Y + 1 < LINES && DRAW_AREA_MIN_Y >= 0, "");
+
 	stash_pos();
 	try(attrset(COLOR_PAIR(EMPTY_CENTRY.color_id) |
 	            ce2curs_attrs(EMPTY_CENTRY.attrs)));
-	int draw_area_width = DRAW_AREA_WIDTH;
 	foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
 		// Draw 100 spaces at once
 		try(move(y, DRAW_AREA_MIN_X));
 		for ( int drawn = 0; drawn < DRAW_AREA_WIDTH; drawn += 100 ) {
-			try(addnstr(SPACES_100, draw_area_width - drawn));
+			try(addnstr(SPACES_100, DRAW_AREA_WIDTH - drawn));
 		}
 		foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
 			buffer[y][x] = EMPTY_CENTRY;
@@ -594,20 +598,44 @@ fn draw_ui() {
 /** startfold draw_buffer
  * Draw the buffer
  */
-fn draw_buffer(struct CEntry buffer[LINES][COLS]) {
+fn draw_buffer(struct CEntry buffer[LINES][COLS],
+               struct CEntry clip_buf[LINES][COLS]) {
 	draw_ui();
-	move(DRAW_AREA_MIN_Y, DRAW_AREA_MIN_X);
 	foreach (y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y + 1) {
-		move(y, 0);
 		foreach (x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X + 1) {
-			struct CEntry *e = &buffer[y][x];
+			redraw_char(buffer, y, x, clip_buf[y][x].ch);
+		}
+	}
 
-			/* Convert attrs */
-			attr_t attrs = ce2curs_attrs(e->attrs);
+	if ( mode == mode_select || mode == mode_drag ) {
+		/* Draw active drag area inverted */
+		draw_area(buffer, min(drag_start.y, mevent.y),
+		          min(drag_start.x, mevent.x), max(drag_start.y, mevent.y),
+		          max(drag_start.x, mevent.x), true);
+	}
 
-			/* Write to screen */
-			attrset(attrs | COLOR_PAIR(e->color_id));
-			addch(e->ch);
+	refresh();
+}
+
+fn redraw_char(struct CEntry buffer[LINES][COLS], int y, int x, bool inverted) {
+	assert(x < COLS && x >= 0, "");
+	assert(y < LINES && y >= 0, "");
+	struct CEntry *e = &buffer[y][x];
+
+	/* Convert attrs */
+	attr_t attrs = ce2curs_attrs(e->attrs ^ (CE_REVERSE * inverted));
+
+	/* Write to screen */
+	attrset(attrs | COLOR_PAIR(e->color_id));
+	mvaddch(y, x, e->ch);
+}
+
+fn draw_area(struct CEntry buffer[LINES][COLS], int min_y, int min_x, int max_y,
+             int max_x, bool inverted) {
+	draw_ui();
+	foreach (y, min_y, max_y + 1) {
+		foreach (x, min_x, max_x + 1) {
+			redraw_char(buffer, y, x, inverted);
 		}
 	}
 	refresh();
@@ -625,7 +653,7 @@ fn dump_buffer_readable(struct CEntry buffer[LINES][COLS], FILE *file) {
 		foreach (x, 0, COLS) {
 			fprintf(file, "%c", buffer[y][x].ch);
 		}
-		fprintf(file, "\n");
+		fprintf(file, "");
 	}
 	fprintf(file, "<--- End char dump --->\n");
 	fprintf(file, "<--- Attrs and color --->\nCE%d,%d\n", LINES, COLS);
@@ -634,7 +662,7 @@ fn dump_buffer_readable(struct CEntry buffer[LINES][COLS], FILE *file) {
 			fprintf(file, "|%c %2d %d", buffer[y][x].ch, buffer[y][x].color_id,
 			        buffer[y][x].attrs);
 		}
-		fprintf(file, "\n");
+		fprintf(file, "");
 	}
 	fprintf(file, "<--- End full dump --->\n");
 }
@@ -755,78 +783,20 @@ Result load_from_file(struct CEntry buffer[LINES][COLS], int insert_pos_y,
 
 /* startfold Clipping */
 
-/** startfold clip_area
- * Clip an area
- * Write all char in the area start_x..end_x, start_y..end_y to the clip buffer
- * and invert the colors on the screen
- */
-fn clip_area(struct CEntry clip_buf[LINES][COLS], int start_y, int start_x,
-             int end_y, int end_x) {
-	try(move(start_y, start_x));
+fn copy_area(struct CEntry src[LINES][COLS], struct CEntry dest[LINES][COLS],
+             int start_y, int start_x, int end_y, int end_x) {
+	assert(end_y >= start_y, "");
+	assert(end_x >= start_x, "");
+	assert(start_x < COLS && start_x >= 0, "");
+	assert(start_y < LINES && start_y >= 0, "");
+
 	foreach (y, start_y, end_y + 1) {
-		try(move(y, start_x));
 		foreach (x, start_x, end_x + 1) {
-			clip_char_under_cursor(clip_buf, y, x);
+			dest[y][x] = src[y][x];
 		}
+		// memcpy(&dest[y][start_x], &src[y][start_x],
+		//        sizeof(struct CEntry) * (end_x - start_x));
 	}
-	try(move(end_y, end_x));
-}
-
-fn unclip_area(struct CEntry clip_buf[LINES][COLS], int start_y, int start_x,
-               int end_y, int end_x) {
-	try(move(start_y, start_x));
-	foreach (y, start_y, end_y + 1) {
-		try(move(y, start_x));
-		foreach (x, start_x, end_x + 1) {
-			unclip_char_under_cursor(clip_buf, y, x);
-		}
-	}
-	try(move(end_y, end_x));
-}
-
-/* endfold */
-
-/** startfold clip_char_under_cursor
- * Clip a char under the cursor.
- * Writes the char to the clip buffer and the inverses it on the screen.
- * @param clip_buf The clip buffer
- * @param y The y position
- * @param x The x position
- *
- * @note Advances the cursor by one
- */
-fn clip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int y, int x) {
-	chtype ch = inch();
-
-	/* Write to clip buffer */
-	clip_buf[y][x] = curs2ce_all(ch);
-
-	/* Write to screen */
-	attr_t attrs = (ch & A_ATTRIBUTES) ^ A_REVERSE;
-	attrset(attrs | COLOR_PAIR(ch & A_COLOR));
-	try(addch(ch));
-}
-
-/* endfold */
-
-/** startfold unclip_char_under_cursor
- * Unclip a char under the cursor.
- * Removes char from the clip buffer and reverts it (back) on the screen.
- */
-fn unclip_char_under_cursor(struct CEntry clip_buf[LINES][COLS], int y, int x) {
-	if ( clip_buf[y][x].ch == 0 ) {
-		return;
-	}
-	/* Read from screen */
-	chtype ch = inch();
-
-	/* Delete char from clip buffer */
-	clip_buf[y][x].ch = 0;
-
-	/* Re-revert char on screen */
-	attr_t attributes = (ch & A_ATTRIBUTES) ^ A_REVERSE;
-	attrset(attributes | COLOR_PAIR(ch & A_COLOR));
-	try(addch(ch & A_CHARTEXT));
 }
 
 /* endfold */
@@ -843,6 +813,8 @@ fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
 	x = clamp(x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
 
 	/* Write to buffer */
+	assert(x < COLS && x >= 0, "");
+	assert(y < LINES && y >= 0, "");
 	buffer[y][x].ch = ch;
 	buffer[y][x].color_id = color_id;
 	buffer[y][x].attrs = ce_attrs;
@@ -889,6 +861,14 @@ fn react_to_mouse(struct CEntry buffer[LINES][COLS],
 		is_dragging = false;
 		drag_end.y = mevent.y;
 		drag_end.x = mevent.x;
+
+		if ( mode == mode_select ) {
+			copy_area(buffer, clip_buf, min(drag_end.y, drag_start.y),
+			          min(drag_end.x, drag_start.x),
+			          max(drag_end.y, drag_start.y),
+			          max(drag_end.x, drag_start.x));
+			draw_buffer(buffer, clip_buf);
+		}
 	}
 
 	/* Mouse drag */
@@ -925,25 +905,6 @@ fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
 		mevent.y = clamp(mevent.y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
 		mevent.x = clamp(mevent.x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
 
-		int min_y = min(drag_start.y, mevent.y);
-		int min_x = min(drag_start.x, mevent.x);
-		int max_y = max(drag_start.y, mevent.y);
-		int max_x = max(drag_start.x, mevent.x);
-
-		clip_area(clip_buf, min_y, min_x, max_y, max_x);
-
-		/* Clip area has shrinked -> unclip the edges */
-		if ( drag_end.y > max_y ) {
-			unclip_area(clip_buf, max_y + 1, min_x, drag_end.y, max_x);
-		} else if ( drag_end.y < min_y ) {
-			unclip_area(clip_buf, drag_end.y, min_x, min_y - 1, max_x);
-		}
-		if ( drag_end.x > max_x ) {
-			unclip_area(clip_buf, min_y, max_x + 1, max_y, drag_end.x);
-		} else if ( drag_end.x < min_x ) {
-			unclip_area(clip_buf, min_y, drag_end.x, max_y, min_x - 1);
-		}
-
 		drag_end.y = mevent.y;
 		drag_end.x = mevent.x;
 		try(move(mevent.y, mevent.x));
@@ -953,18 +914,5 @@ fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
 /* endfold */
 
 fn swallow_interrupt(int sig) { log_add(LOG_DEBUG, "Caught signal %d\n", sig); }
-
-/** startfold die_gracefully
- * Do some cleaning up and exit safely.
- * @param sig The signal that caused the exit
- */
-fn die_gracefully(int sig) {
-	attrset(A_NORMAL);
-	endwin();
-	log_add(LOG_ERR, "Exiting with signal %d\n", sig);
-	exit(sig);
-}
-
-/* endfold */
 
 // vim: fdm=marker fmr=startfold,endfold

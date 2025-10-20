@@ -19,6 +19,9 @@
 #define usize size_t
 #define isize intptr_t
 
+#define _STRINGIFY(x) #x
+#define STRINGIFY(x) _STRINGIFY(x)
+
 /*** Function-like macros and inline functions ***/
 #define KEY_ESC 27
 #define CTRL(x) ((x) & 0x1f)

@@ -4,7 +4,6 @@
 #include "cursed.h"
 #include "header.h"
 
-#include <assert.h>
 #include <ncurses.h>
 
 /*** Char Entry Types and helpers ***/
