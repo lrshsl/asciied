@@ -789,11 +789,9 @@ fn copy_area(struct CEntry src[LINES][COLS], struct CEntry dest[LINES][COLS],
 	assert(y1 < LINES && y1 >= 0, "");
 
 	foreach (y, min(y1, y2), max(y1, y2) + 1) {
-		foreach (x, min(x1, x2), max(x1, x2) + 1) {
-			dest[y][x] = src[y][x];
-		}
-		// memcpy(&dest[y][start_x], &src[y][start_x],
-		//        sizeof(struct CEntry) * (end_x - start_x));
+		int n = abs(x1 - x2) + 1;
+		memcpy(&dest[y][min(x1, x2)], &src[y][max(x1, x2)],
+		       sizeof(struct CEntry) * n);
 	}
 }
 
