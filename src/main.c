@@ -609,9 +609,8 @@ fn draw_buffer(struct CEntry buffer[LINES][COLS],
 
 	if ( mode == mode_select || mode == mode_drag ) {
 		/* Draw active drag area inverted */
-		draw_area(buffer, min(drag_start.y, mevent.y),
-		          min(drag_start.x, mevent.x), max(drag_start.y, mevent.y),
-		          max(drag_start.x, mevent.x), true);
+		draw_area(buffer, drag_start.y, drag_start.x, drag_end.y, drag_end.x,
+		          true);
 	}
 
 	refresh();
@@ -630,11 +629,12 @@ fn redraw_char(struct CEntry buffer[LINES][COLS], int y, int x, bool inverted) {
 	mvaddch(y, x, e->ch);
 }
 
-fn draw_area(struct CEntry buffer[LINES][COLS], int min_y, int min_x, int max_y,
-             int max_x, bool inverted) {
+fn draw_area(struct CEntry buffer[LINES][COLS], int y1, int x1, int y2, int x2,
+             bool inverted) {
+	assert(y1 >= 0 && x1 >= 0 && y2 < LINES && x2 < COLS, "");
 	draw_ui();
-	foreach (y, min_y, max_y + 1) {
-		foreach (x, min_x, max_x + 1) {
+	foreach (y, min(y1, y2), max(y1, y2) + 1) {
+		foreach (x, min(x1, x2), max(x1, x2) + 1) {
 			redraw_char(buffer, y, x, inverted);
 		}
 	}
@@ -784,22 +784,18 @@ Result load_from_file(struct CEntry buffer[LINES][COLS], int insert_pos_y,
 /* startfold Clipping */
 
 fn copy_area(struct CEntry src[LINES][COLS], struct CEntry dest[LINES][COLS],
-             int start_y, int start_x, int end_y, int end_x) {
-	assert(end_y >= start_y, "");
-	assert(end_x >= start_x, "");
-	assert(start_x < COLS && start_x >= 0, "");
-	assert(start_y < LINES && start_y >= 0, "");
+             int y1, int x1, int y2, int x2) {
+	assert(x1 < COLS && x1 >= 0, "");
+	assert(y1 < LINES && y1 >= 0, "");
 
-	foreach (y, start_y, end_y + 1) {
-		foreach (x, start_x, end_x + 1) {
+	foreach (y, min(y1, y2), max(y1, y2) + 1) {
+		foreach (x, min(x1, x2), max(x1, x2) + 1) {
 			dest[y][x] = src[y][x];
 		}
 		// memcpy(&dest[y][start_x], &src[y][start_x],
 		//        sizeof(struct CEntry) * (end_x - start_x));
 	}
 }
-
-/* endfold */
 
 /* endfold Clipping */
 
@@ -863,10 +859,8 @@ fn react_to_mouse(struct CEntry buffer[LINES][COLS],
 		drag_end.x = mevent.x;
 
 		if ( mode == mode_select ) {
-			copy_area(buffer, clip_buf, min(drag_end.y, drag_start.y),
-			          min(drag_end.x, drag_start.x),
-			          max(drag_end.y, drag_start.y),
-			          max(drag_end.x, drag_start.x));
+			copy_area(buffer, clip_buf, drag_start.y, drag_start.x, drag_end.y,
+			          drag_end.x);
 			draw_buffer(buffer, clip_buf);
 		}
 	}
@@ -905,8 +899,13 @@ fn process_mouse_drag(struct CEntry buffer[LINES][COLS],
 		mevent.y = clamp(mevent.y, DRAW_AREA_MIN_Y, DRAW_AREA_MAX_Y);
 		mevent.x = clamp(mevent.x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
 
+		draw_buffer(buffer, clip_buf); // Todo: no need to redraw entire buffer
+		draw_area(buffer, drag_start.y, drag_start.x, drag_end.y, drag_end.x,
+		          true);
+
 		drag_end.y = mevent.y;
 		drag_end.x = mevent.x;
+
 		try(move(mevent.y, mevent.x));
 	}
 }

@@ -25,25 +25,25 @@ fn log_add(enum LogLevel lvl, char *fmt, ...) {
 	case LOG_NONE:
 		break;
 	case LOG_FATAL:
-		prefix = "FATAL: ";
+		prefix = "FATAL| ";
 		break;
 	case LOG_ERR:
-		prefix = "ERR  : ";
+		prefix = "ERR  | ";
 		break;
 	case LOG_WARN:
-		prefix = "WARN : ";
+		prefix = "WARN | ";
 		break;
 	case LOG_INFO:
-		prefix = "INFO : ";
+		prefix = "INFO | ";
 		break;
 	case LOG_DEBUG:
-		prefix = "DEBUG: ";
+		prefix = "DEBUG| ";
 		break;
 	case LOG_TRACE:
-		prefix = "DEBUG: ";
+		prefix = "TRACE| ";
 		break;
 	case LOG_ALL:
-		prefix = "LOG  : ";
+		prefix = "LOG  | ";
 		break;
 	}
 

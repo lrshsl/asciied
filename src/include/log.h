@@ -6,7 +6,6 @@
 
 /**
  * Log levels.
- * Will be extended further and order might change
  */
 enum LogLevel {
 	LOG_NONE,
@@ -42,14 +41,17 @@ fn die_gracefully(int sig);
 
 /* endfold */
 
+#define PRE(cond, fmt)                                                         \
+	"[" __FILE__                                                               \
+	":" STRINGIFY(__LINE__) "] "                                               \
+							"Assertion (" STRINGIFY(cond) ") failed: " fmt     \
+														  "\n"
+
 #define assert(cond, fmt, ...)                                                 \
 	{                                                                          \
 		if ( !(cond) ) {                                                       \
-			log_add(LOG_FATAL, "Assertion failed: " fmt "\n", ##__VA_ARGS__);  \
-			fprintf(stderr,                                                    \
-			        "Assertion failed " __FILE__                               \
-			        ":" STRINGIFY(__LINE__) " " fmt "\n",                      \
-			        ##__VA_ARGS__);                                            \
+			log_add(LOG_FATAL, PRE(cond, fmt), ##__VA_ARGS__);                 \
+			fprintf(stderr, PRE(cond, fmt), ##__VA_ARGS__);                    \
 			fflush(stderr);                                                    \
 			die_gracefully(illegal_state);                                     \
 		}                                                                      \
