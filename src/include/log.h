@@ -46,7 +46,11 @@ fn die_gracefully(int sig);
 	":" STRINGIFY(__LINE__) "] "                                               \
 							"Assertion (" STRINGIFY(cond) ") failed: " fmt     \
 														  "\n"
-
+#if !DEBUG
+#define assert(cond, fmt, ...)                                                 \
+	{                                                                          \
+	}
+#else
 #define assert(cond, fmt, ...)                                                 \
 	{                                                                          \
 		if ( !(cond) ) {                                                       \
@@ -56,5 +60,6 @@ fn die_gracefully(int sig);
 			die_gracefully(illegal_state);                                     \
 		}                                                                      \
 	}
+#endif
 
 #endif

@@ -11,3 +11,4 @@ saves/
 !saves/examples/*.centry
 
 .cache/
+compile_commands.json

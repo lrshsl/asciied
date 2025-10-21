@@ -72,10 +72,6 @@ local bool is_dragging = false;
 /* endfold */
 
 /* startfold Main */
-#ifndef IS_TEST_BUILD
-#define IS_TEST_BUILD 0
-#endif
-
 #if !IS_TEST_BUILD
 
 /** startfold init
@@ -152,6 +148,10 @@ int main(void) {
 	clear_draw_area(buffer);
 	/* endfold */
 
+	/* Quick sanity checks */
+	assert(DRAW_AREA_MAX_X + 1 < COLS && DRAW_AREA_MIN_X >= 0, "");
+	assert(DRAW_AREA_MAX_Y + 1 < LINES && DRAW_AREA_MIN_Y >= 0, "");
+
 	/** startfold loop **/
 	loop {
 		getyx(stdscr, y, x);
@@ -215,7 +215,8 @@ int main(void) {
 
 			/* Save and load file */
 		case CTRL('s'):
-			assert(SAVE_DIR_LEN == strlen(SAVE_DIR), "");
+			assert(SAVE_DIR_LEN == strlen(SAVE_DIR),
+			       "[main] SAVE_DIR_LEN outdated");
 			notify("Save as: ");
 			cmdline_prepare();
 			if ( cmdline_buf[0] != '\0' ) {
@@ -491,8 +492,10 @@ fn draw_status_line() {
 	attrset(COLOR_PAIR(current_color_id) | A_REVERSE);
 	try(addnstr(COLOR_INDICATOR_STRING, COLOR_INDICATOR_LEN));
 
-	assert(strlen(COLOR_INDICATOR_STRING) >= COLOR_INDICATOR_LEN, "");
-	assert(strlen(mode_str) == MODE_INDICATOR_LEN, "");
+	assert(strlen(COLOR_INDICATOR_STRING) >= COLOR_INDICATOR_LEN,
+	       "[draw_status_line] COLOR_INDICATOR_STRING too short");
+	assert(strlen(mode_str) == MODE_INDICATOR_LEN,
+	       "[draw_status_line] MODE_INDICATOR_LEN outdated");
 
 	restore_pos();
 }
@@ -535,9 +538,6 @@ bool endswith(char *str, char *suffix) {
  * draw_buffer(buf);`, but faster (iterates only once) and only sets and draws.
  */
 fn clear_draw_area(struct CEntry buffer[LINES][COLS]) {
-	assert(DRAW_AREA_MAX_X + 1 < COLS && DRAW_AREA_MIN_X >= 0, "");
-	assert(DRAW_AREA_MAX_Y + 1 < LINES && DRAW_AREA_MIN_Y >= 0, "");
-
 	stash_pos();
 	try(attrset(COLOR_PAIR(EMPTY_CENTRY.color_id) |
 	            ce2curs_attrs(EMPTY_CENTRY.attrs)));
@@ -785,8 +785,8 @@ Result load_from_file(struct CEntry buffer[LINES][COLS], int insert_pos_y,
 
 fn copy_area(struct CEntry src[LINES][COLS], struct CEntry dest[LINES][COLS],
              int y1, int x1, int y2, int x2) {
-	assert(x1 < COLS && x1 >= 0, "");
-	assert(y1 < LINES && y1 >= 0, "");
+	assert(x1 < COLS && x1 >= 0, "[copy_area] x1 out of bounds");
+	assert(y1 < LINES && y1 >= 0, "[copy_area] y1 out of bounds");
 
 	foreach (y, min(y1, y2), max(y1, y2) + 1) {
 		int n = abs(x1 - x2) + 1;
@@ -807,8 +807,8 @@ fn write_char(struct CEntry buffer[LINES][COLS], int y, int x, char ch,
 	x = clamp(x, DRAW_AREA_MIN_X, DRAW_AREA_MAX_X);
 
 	/* Write to buffer */
-	assert(x < COLS && x >= 0, "");
-	assert(y < LINES && y >= 0, "");
+	assert(x < COLS && x >= 0, "[write_char] x out of bounds");
+	assert(y < LINES && y >= 0, "[write_char] y out of bounds");
 	buffer[y][x].ch = ch;
 	buffer[y][x].color_id = color_id;
 	buffer[y][x].attrs = ce_attrs;

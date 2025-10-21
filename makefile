@@ -14,7 +14,7 @@ testbin = $(builddir)/$(name)_tests
 # How to build
 cc = gcc
 cflags = -Iinclude -lcurses -funsigned-char -funsigned-bitfields
-dbgflags = -g -ggdb -Wall -Wextra --std=c99 #-fsanitize=address
+dbgflags = -g -ggdb -Wall -Wextra --std=c99 -D DEBUG=1 #-fsanitize=address
 testflags = $(dbgflags) -D IS_TEST_BUILD=1
 valgrindflags = --leak-check=full --suppressions=ncurses.supp
 relflags = -O3 -s
@@ -68,8 +68,8 @@ check:
 
 configure:
 	bear -- $(MAKE) debug
-	bear --append -- $(MAKE) release
-	bear --append -- $(MAKE) test
+	@# bear --append -- $(MAKE) test
+	@# bear --append -- $(MAKE) release
 
 # Generate documentation
 # > Note: The output directory should correspond to $(docdir)
