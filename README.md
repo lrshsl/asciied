@@ -24,7 +24,7 @@ Needs to be installed and available:
 For *nix:
 
 ```sh
-git clone https://github.com/lrshsl/asciied
+git clone https://codeberg.org/bitrot/asciied
 cd asciied
 make release
 ```
