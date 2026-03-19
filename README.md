@@ -1,6 +1,6 @@
 # AsciiEd
 
-![Ascii Ed](docs/asciied_face.png)
+![Ascii Ed](/docs/asciied_face.png)
 
 A simple editor for ASCII art. It allows you to draw images with nothing more
 than basic ASCII text.
@@ -46,7 +46,7 @@ The saved buffers are found under the installation directory in the `saves/` sub
 
 The editor supports several "Modes", in which keyboard and mouse signals mean
 different things. The modes and their keybindings are explained in the
-[modes.md](docs/modes.md) file.
+[modes.md](/docs/modes.md) file.
 
 
 ### Change drawing character
@@ -69,5 +69,5 @@ top. In the status bar on the bottom right there is an indicator which shows
 you which color you are currently drawing with.
 
 Commonly used colors can be saved and accessed using the [quick
-palette](docs/colors.md#quick-palette).
+palette](/docs/colors.md#quick-palette).
 
