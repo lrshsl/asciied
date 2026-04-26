@@ -1,6 +1,8 @@
 # AsciiEd
 
-![Ascii Ed](docs/asciied_face.png)
+![Screenshot](docs/screenshot.png)
+
+<img src="docs/asciied_face.png" alt="AsciiEd icon" width="200"/>
 
 A simple editor for ASCII art. It allows you to draw images with nothing more
 than basic ASCII text.
@@ -70,4 +72,14 @@ you which color you are currently drawing with.
 
 Commonly used colors can be saved and accessed using the [quick
 palette](docs/colors.md#quick-palette).
+
+
+### Save and load
+
+When pressing `Ctrl-s` (save), typing a name and hitting enter, the
+drawing will be saved under that name in a binary format. The
+drawing can be loaded again by typing `Ctrl-o` (open), typing the
+name and hitting enter. Note that there are currently issues if
+the terminal resolution isn't the same as when it was saved.
+
 
